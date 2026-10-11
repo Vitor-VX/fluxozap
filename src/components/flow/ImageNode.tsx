@@ -42,10 +42,16 @@ export const ImageNode = ({ data, selected }: { data: any; selected?: boolean })
               }}
             />
           </div>
+        ) : data.mediaId ? (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-center">
+            <ImageIcon className="w-5 h-5 text-emerald-600 mx-auto mb-1" />
+            <p className="text-[11px] font-semibold text-emerald-700">Imagem pronta na Meta</p>
+            <p className="text-[10px] text-emerald-600 truncate mt-0.5">{data.filename}</p>
+          </div>
         ) : (
           <div className="rounded-lg border border-dashed border-purple-200 bg-purple-50/50 p-4 text-center">
             <ImageIcon className="w-5 h-5 text-purple-400 mx-auto mb-1" />
-            <p className="text-[11px] text-purple-600">Sem URL de imagem informada</p>
+            <p className="text-[11px] text-purple-600">Nenhuma imagem configurada</p>
           </div>
         )}
 

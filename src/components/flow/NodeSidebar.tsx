@@ -9,6 +9,7 @@ import {
   Plus,
   Mic,
   Video,
+  BadgeDollarSign,
 } from 'lucide-react';
 import { NodeType } from '../../types/flow';
 
@@ -29,7 +30,7 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
     {
       type: 'send_image' as NodeType,
       title: 'Enviar Imagem',
-      desc: 'Foto ou banner com upload direto para R2',
+      desc: 'Foto ou banner com upload direto para a Meta',
       icon: ImageIcon,
       color: 'bg-purple-600',
       lightColor: 'bg-purple-50 text-purple-700 border-purple-200',
@@ -59,9 +60,17 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
       lightColor: 'bg-amber-50 text-amber-700 border-amber-200',
     },
     {
+      type: 'xpag_payment' as NodeType,
+      title: 'Gerar Pagamento',
+      desc: 'Gera PIX, SPEI ou voucher OXXO pela XPag',
+      icon: BadgeDollarSign,
+      color: 'bg-violet-600',
+      lightColor: 'bg-violet-50 text-violet-700 border-violet-200',
+    },
+    {
       type: 'wait_reply' as NodeType,
       title: 'Aguardar Resposta',
-      desc: 'Pausa o bot até o cliente responder e salva na variável',
+      desc: 'Espera uma resposta e pode seguir por timeout',
       icon: MessageCircleQuestion,
       color: 'bg-emerald-600',
       lightColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -69,7 +78,7 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
     {
       type: 'delay' as NodeType,
       title: 'Tempo de Espera',
-      desc: 'Simula digitação humana ou pausa programada',
+      desc: 'Agenda a retomada mesmo após reiniciar o servidor',
       icon: Clock,
       color: 'bg-slate-700',
       lightColor: 'bg-slate-100 text-slate-700 border-slate-200',

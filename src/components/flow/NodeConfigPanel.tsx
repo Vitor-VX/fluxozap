@@ -15,10 +15,12 @@ import {
   FileText,
   Image as ImageIcon,
   CheckCircle2,
+  Copy,
 } from 'lucide-react';
 import { FlowNodeData } from '../../types/flow';
 
 interface NodeConfigPanelProps {
+  accountId?: string;
   selectedNode: { id: string; type: string; data: FlowNodeData } | null;
   onUpdateData: (nodeId: string, newData: Partial<FlowNodeData>) => void;
   onDeleteNode: (nodeId: string) => void;
@@ -26,6 +28,7 @@ interface NodeConfigPanelProps {
 }
 
 export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
+  accountId,
   selectedNode,
   onUpdateData,
   onDeleteNode,
@@ -34,55 +37,69 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   const [newKeywordInput, setNewKeywordInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [copiedVariable, setCopiedVariable] = useState<string | null>(null);
 
   if (!selectedNode) return null;
 
   const data = selectedNode.data;
   const isStart = selectedNode.type === 'start';
 
-  // Handle direct file upload to Cloudflare R2 / Server storage
-  const handleUploadToR2 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const copyVariable = async (variableName: string) => {
+    const token = `{{${variableName}}}`;
+    await navigator.clipboard.writeText(token);
+    setCopiedVariable(variableName);
+    window.setTimeout(() => setCopiedVariable(null), 1400);
+  };
+
+  // Upload outbound media directly to Meta; R2 remains exclusive to received media.
+  const handleUploadToMeta = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!accountId) {
+      alert('Selecione uma linha do WhatsApp antes de enviar a mídia.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      alert('O arquivo excede o limite máximo de 100 MB.');
+      e.target.value = '';
+      return;
+    }
 
     setIsUploading(true);
     setUploadSuccess(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64Data = reader.result as string;
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: file.name,
-            fileData: base64Data,
-            mimeType: file.type,
-          }),
-        });
-
-        const resData = await res.json();
-        if (res.ok && resData.success) {
-          onUpdateData(selectedNode.id, {
-            mediaUrl: resData.url,
-            filename: file.name,
-          });
-          setUploadSuccess(
-            resData.storage === 'r2'
-              ? 'Arquivo enviado com sucesso para o Cloudflare R2!'
-              : 'Arquivo salvo com sucesso no servidor de mídia!'
-          );
-          setTimeout(() => setUploadSuccess(null), 5000);
-        } else {
-          alert(resData.error || 'Erro ao subir arquivo.');
-        }
-        setIsUploading(false);
-      };
-      reader.readAsDataURL(file);
+      const res = await fetch(`/api/meta/media?accountId=${encodeURIComponent(accountId)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-File-Name': encodeURIComponent(file.name),
+          'X-File-Type': file.type || 'application/octet-stream',
+        },
+        body: file,
+      });
+      const raw = await res.text();
+      let resData: any = {};
+      try { resData = JSON.parse(raw); } catch { resData = { error: raw }; }
+      if (!res.ok || !resData.mediaId) {
+        alert(resData.error || 'A Meta recusou o upload do arquivo.');
+        return;
+      }
+      onUpdateData(selectedNode.id, {
+        mediaId: resData.mediaId,
+        mediaUrl: '',
+        mediaMimeType: resData.mimeType || file.type,
+        mediaSize: resData.size || file.size,
+        filename: resData.filename || file.name,
+      });
+      setUploadSuccess('Arquivo preparado diretamente na Meta. Nenhuma cópia foi salva no R2.');
+      setTimeout(() => setUploadSuccess(null), 5000);
     } catch (err: any) {
+      alert(err.message || 'Erro ao enviar arquivo diretamente para a Meta.');
+    } finally {
       setIsUploading(false);
-      alert(err.message || 'Erro ao ler arquivo.');
+      e.target.value = '';
     }
   };
 
@@ -277,10 +294,10 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
             <div>
               <span className="block text-[11px] font-medium text-slate-500 mb-1.5">
-                Inserir Variável Coletada:
+                Inserir variável padrão ou coletada:
               </span>
               <div className="flex flex-wrap gap-1.5">
-                {['nome', 'telefone', 'interesse', 'email'].map((v) => (
+                {['nome', 'telefone', 'data', 'hora', 'dia_semana', 'interesse', 'email'].map((v) => (
                   <button
                     key={v}
                     type="button"
@@ -304,16 +321,23 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           </div>
         )}
 
+        {data.mediaId && ['send_image', 'send_audio', 'send_video', 'send_document'].includes(selectedNode.type) && (
+          <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-[11px]">
+            <p className="font-semibold">Mídia pronta na Meta</p>
+            <p className="mt-0.5 truncate">{data.filename || data.mediaId} · não armazenada no R2</p>
+          </div>
+        )}
+
         {/* Image Node Fields */}
         {selectedNode.type === 'send_image' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Upload da Imagem para Cloudflare R2</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar imagem diretamente para a Meta</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-purple-300 hover:border-purple-500 rounded-xl bg-purple-50/50 hover:bg-purple-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
-                    <span className="text-xs font-semibold text-purple-700">Subindo para R2...</span>
+                    <span className="text-xs font-semibold text-purple-700">Enviando para a Meta...</span>
                   </>
                 ) : (
                   <>
@@ -326,7 +350,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={handleUploadToR2}
+                  onChange={handleUploadToMeta}
                   disabled={isUploading}
                   className="hidden"
                 />
@@ -334,19 +358,19 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">URL Pública da Imagem</label>
+              <label className="block font-semibold text-slate-700 mb-1">URL externa da imagem (opcional)</label>
               <div className="relative">
                 <input
                   type="text"
                   value={data.mediaUrl || ''}
-                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
+                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value, mediaId: '', mediaMimeType: '' })}
                   className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-xs"
                   placeholder="https://pub-xxx.r2.dev/foto.jpg"
                 />
                 <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                Ou digite uma URL pública externa compatível com a Meta API.
+                Arquivos locais vão direto para a Meta. Uma URL externa será baixada pelo servidor e convertida em media_id no envio.
               </p>
             </div>
 
@@ -367,12 +391,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_audio' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Upload do Áudio para Cloudflare R2</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar áudio diretamente para a Meta</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-teal-300 hover:border-teal-500 rounded-xl bg-teal-50/50 hover:bg-teal-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-teal-600 animate-spin" />
-                    <span className="text-xs font-semibold text-teal-700">Subindo áudio para R2...</span>
+                    <span className="text-xs font-semibold text-teal-700">Enviando áudio para a Meta...</span>
                   </>
                 ) : (
                   <>
@@ -385,7 +409,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept="audio/*"
-                  onChange={handleUploadToR2}
+                  onChange={handleUploadToMeta}
                   disabled={isUploading}
                   className="hidden"
                 />
@@ -393,19 +417,19 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">URL Pública do Áudio</label>
+              <label className="block font-semibold text-slate-700 mb-1">URL externa do áudio (opcional)</label>
               <div className="relative">
                 <input
                   type="text"
                   value={data.mediaUrl || ''}
-                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
+                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value, mediaId: '', mediaMimeType: '' })}
                   className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-xs"
                   placeholder="https://pub-xxx.r2.dev/audio.mp3"
                 />
                 <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                A Meta WhatsApp API requer áudios em formato AAC/MP3/OGG acessíveis publicamente.
+                Arquivos locais não passam pelo R2; são enviados diretamente para a biblioteca de mídia da Meta.
               </p>
             </div>
 
@@ -426,12 +450,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_video' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Upload do Vídeo para Cloudflare R2</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar vídeo diretamente para a Meta</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-rose-300 hover:border-rose-500 rounded-xl bg-rose-50/50 hover:bg-rose-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-rose-600 animate-spin" />
-                    <span className="text-xs font-semibold text-rose-700">Subindo vídeo para R2...</span>
+                    <span className="text-xs font-semibold text-rose-700">Enviando vídeo para a Meta...</span>
                   </>
                 ) : (
                   <>
@@ -444,7 +468,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept="video/*"
-                  onChange={handleUploadToR2}
+                  onChange={handleUploadToMeta}
                   disabled={isUploading}
                   className="hidden"
                 />
@@ -452,12 +476,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">URL Pública do Vídeo</label>
+              <label className="block font-semibold text-slate-700 mb-1">URL externa do vídeo (opcional)</label>
               <div className="relative">
                 <input
                   type="text"
                   value={data.mediaUrl || ''}
-                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
+                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value, mediaId: '', mediaMimeType: '' })}
                   className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 text-xs"
                   placeholder="https://pub-xxx.r2.dev/video.mp4"
                 />
@@ -482,12 +506,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_document' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Upload do Documento para Cloudflare R2</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar documento diretamente para a Meta</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-amber-300 hover:border-amber-500 rounded-xl bg-amber-50/50 hover:bg-amber-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />
-                    <span className="text-xs font-semibold text-amber-700">Subindo arquivo para R2...</span>
+                    <span className="text-xs font-semibold text-amber-700">Enviando arquivo para a Meta...</span>
                   </>
                 ) : (
                   <>
@@ -500,7 +524,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-                  onChange={handleUploadToR2}
+                  onChange={handleUploadToMeta}
                   disabled={isUploading}
                   className="hidden"
                 />
@@ -508,12 +532,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">URL do Documento (PDF/Doc)</label>
+              <label className="block font-semibold text-slate-700 mb-1">URL externa do documento (opcional)</label>
               <div className="relative">
                 <input
                   type="text"
                   value={data.mediaUrl || ''}
-                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
+                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value, mediaId: '', mediaMimeType: '' })}
                   className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs"
                   placeholder="https://pub-xxx.r2.dev/catalogo.pdf"
                 />
@@ -546,6 +570,191 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         )}
 
         {/* Wait Reply Node Fields */}
+        {selectedNode.type === 'xpag_payment' && (
+          <div className="space-y-3">
+            <div className="p-3 rounded-xl bg-violet-50 border border-violet-200 text-[10px] leading-relaxed text-violet-900">
+              Este bloco somente gera e acompanha a cobrança. Ele não envia um texto pronto: conecte a saída <strong>Gerada</strong> aos blocos de texto ou imagem e monte a mensagem com as variáveis abaixo.
+            </div>
+            <div className="p-2.5 bg-violet-50 rounded-lg border border-violet-100 flex gap-2">
+              <Info className="w-4 h-4 text-violet-600 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-violet-900 leading-relaxed">
+                Gera uma cobrança real pela XPag: PIX em BRL ou SPEI/OXXO em MXN. No simulador nenhuma transação financeira é criada.
+              </p>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">País e método de pagamento</label>
+              <select
+                value={data.xpagMethod || 'PIX'}
+                onChange={(e) => onUpdateData(selectedNode.id, { xpagMethod: e.target.value as 'PIX' | 'SPEI' | 'OXXO' })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500"
+              >
+                <option value="PIX">Brasil — PIX (QR Code e Copia e Cola)</option>
+                <option value="SPEI">SPEI — transferência por CLABE</option>
+                <option value="OXXO">OXXO — voucher pago em dinheiro</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Valor em {data.xpagMethod === 'PIX' || !data.xpagMethod ? 'BRL' : 'MXN'}
+              </label>
+              <input
+                type="text"
+                value={data.xpagAmount || ''}
+                onChange={(e) => onUpdateData(selectedNode.id, { xpagAmount: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500"
+                placeholder={data.xpagMethod === 'PIX' || !data.xpagMethod ? '50.00 ou {{valor_brl}}' : '500.00 ou {{valor_mxn}}'}
+              />
+              {data.xpagMethod === 'OXXO' && (
+                <p className="text-[10px] text-amber-700 mt-1">OXXO aceita de 10 a 10.000 MXN e exige o valor exato.</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Nome do pagador (opcional)</label>
+              <input
+                value={data.xpagPayerName || ''}
+                onChange={(e) => onUpdateData(selectedNode.id, { xpagPayerName: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                placeholder="Ex.: {{nome}} ou {{telefone}}"
+              />
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                <button type="button" onClick={() => onUpdateData(selectedNode.id, { xpagPayerName: '{{nome}}' })} className="px-2 py-1 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[10px] font-mono cursor-pointer">
+                  Usar {'{{nome}}'}
+                </button>
+                <button type="button" onClick={() => onUpdateData(selectedNode.id, { xpagPayerName: '{{telefone}}' })} className="px-2 py-1 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[10px] font-mono cursor-pointer">
+                  Usar {'{{telefone}}'}
+                </button>
+                {data.xpagPayerName && (
+                  <button type="button" onClick={() => onUpdateData(selectedNode.id, { xpagPayerName: '' })} className="px-2 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50 text-[10px] text-slate-500 cursor-pointer">
+                    Não enviar nome
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {data.xpagMethod === 'OXXO' ? (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">E-mail do pagador (opcional)</label>
+                <input
+                  value={data.xpagPayerEmail || ''}
+                  onChange={(e) => onUpdateData(selectedNode.id, { xpagPayerEmail: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                  placeholder="{{email}}"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {data.xpagMethod === 'PIX' || !data.xpagMethod ? 'CPF / CNPJ (opcional)' : 'CURP / documento (opcional)'}
+                </label>
+                <input
+                  value={data.xpagPayerDocument || ''}
+                  onChange={(e) => onUpdateData(selectedNode.id, { xpagPayerDocument: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                  placeholder="{{documento}}"
+                />
+                <p className="text-[10px] text-slate-500 mt-1.5">
+                  Se ficar vazio, nenhum documento é inventado ou enviado. O pedido continua identificado pelo ID e pelo webhook exclusivos.
+                </p>
+              </div>
+            )}
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Descrição do pedido (opcional)</label>
+              <input
+                value={data.xpagDescription || ''}
+                onChange={(e) => onUpdateData(selectedNode.id, { xpagDescription: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                placeholder="Ex.: Pedido de {{nome}}"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Prefixo das variáveis</label>
+              <input
+                value={data.xpagVariablePrefix || 'xpag'}
+                onChange={(e) => onUpdateData(selectedNode.id, {
+                  xpagVariablePrefix: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').replace(/^\d+/, '') || 'xpag',
+                })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono"
+                placeholder="xpag"
+              />
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                Use outro prefixo, como <code>pedido_1</code>, quando houver mais de uma cobrança no mesmo fluxo.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="font-semibold text-slate-800 mb-2">Variáveis geradas</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  'status', 'amount', 'currency', 'method', 'provider', 'fee', 'external_id', 'transaction_id', 'request_number',
+                  ...(data.xpagMethod === 'PIX' || !data.xpagMethod ? ['pix_copy_paste', 'qr_code_url'] : []),
+                  ...(data.xpagMethod === 'SPEI' ? ['clabe', 'bank', 'beneficiary', 'reference'] : []),
+                  ...(data.xpagMethod === 'OXXO' ? ['oxxo_reference', 'oxxo_barcode', 'reference'] : []),
+                  'checkout_url', 'expires_at', 'expire_minutes', 'paid_at', 'e2e', 'error', 'error_code',
+                ].map((suffix) => {
+                  const variableName = `${data.xpagVariablePrefix || 'xpag'}_${suffix}`;
+                  return (
+                    <button
+                      key={suffix}
+                      type="button"
+                      onClick={() => copyVariable(variableName)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50 text-[9px] font-mono text-slate-700 cursor-pointer"
+                      title="Copiar variável"
+                    >
+                      {copiedVariable === variableName ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      {`{{${variableName}}}`}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2">
+                Para enviar o QR Code, crie um bloco <strong>Enviar Imagem</strong> e use a variável <code>{`{{${data.xpagVariablePrefix || 'xpag'}_qr_code_url}}`}</code> na URL.
+              </p>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Expiração local de segurança (minutos, opcional)</label>
+              <input
+                type="number"
+                min={1}
+                value={data.xpagExpirationMinutes || ''}
+                onChange={(e) => onUpdateData(selectedNode.id, {
+                  xpagExpirationMinutes: e.target.value ? Math.max(1, Number(e.target.value)) : undefined,
+                })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                placeholder="Usar o vencimento retornado pela XPag"
+              />
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                Se a API não retornar uma data de vencimento, este prazo aciona a saída <strong>Expirada</strong>.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={data.xpagWaitForPayment !== false}
+                onChange={(e) => onUpdateData(selectedNode.id, { xpagWaitForPayment: e.target.checked })}
+                className="mt-0.5 w-4 h-4 accent-violet-600"
+              />
+              <span>
+                <strong className="block text-slate-800">Aguardar confirmação</strong>
+                <span className="text-[10px] text-slate-500 leading-relaxed">
+                  A saída Gerada roda imediatamente para você enviar as instruções. Depois, a sessão aguarda o webhook e continua pela saída Paga, Erro ou Expirada.
+                </span>
+              </span>
+            </label>
+
+            <div className="p-2.5 rounded-lg border border-amber-200 bg-amber-50 text-[10px] leading-relaxed text-amber-900">
+              O WhatsApp não oferece botão nativo para copiar um PIX/CLABE arbitrário em mensagens comuns. Os botões “copiar código” da Meta são restritos a templates de autenticação. Por isso, envie o código em uma mensagem separada para o cliente copiar sem misturá-lo ao restante do texto.
+            </div>
+          </div>
+        )}
+
+        {/* Wait Reply Node Fields */}
         {selectedNode.type === 'wait_reply' && (
           <div className="space-y-3">
             <div className="p-2.5 bg-teal-50 rounded-lg border border-teal-100 flex gap-2">
@@ -556,7 +765,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Nome da Variável para Salvar</label>
+              <label className="block font-semibold text-slate-700 mb-1">Nome da variável para salvar (opcional)</label>
               <div className="flex items-center">
                 <span className="px-2.5 py-2 bg-slate-100 border border-r-0 border-slate-300 rounded-l-lg text-slate-500 font-mono text-xs">
                   {'{{'}
@@ -573,6 +782,9 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   placeholder="ex: nome, email, interesse"
                 />
               </div>
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                Deixe vazio para apenas aguardar a resposta e continuar o fluxo sem armazenar o conteúdo.
+              </p>
             </div>
 
             <div>
@@ -587,27 +799,113 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <option value="email">Endereço de E-mail</option>
               </select>
             </div>
+
+            <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(data.waitReplyTimeoutEnabled)}
+                onChange={(e) => onUpdateData(selectedNode.id, { waitReplyTimeoutEnabled: e.target.checked })}
+                className="mt-0.5 w-4 h-4 accent-teal-600"
+              />
+              <span>
+                <strong className="block text-slate-800">Definir tempo máximo para resposta</strong>
+                <span className="text-[10px] text-slate-500 leading-relaxed">
+                  Se o prazo terminar sem resposta, o funil continua pela saída Tempo esgotado.
+                </span>
+              </span>
+            </label>
+
+            {data.waitReplyTimeoutEnabled && (
+              <div className="grid grid-cols-[1fr_1.35fr] gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Prazo</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={data.waitReplyTimeoutValue || 15}
+                    onChange={(e) => onUpdateData(selectedNode.id, { waitReplyTimeoutValue: Math.max(1, Number(e.target.value) || 1) })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Unidade</label>
+                  <select
+                    value={data.waitReplyTimeoutUnit || 'minutes'}
+                    onChange={(e) => onUpdateData(selectedNode.id, { waitReplyTimeoutUnit: e.target.value as any })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="seconds">Segundos</option>
+                    <option value="minutes">Minutos</option>
+                    <option value="hours">Horas</option>
+                    <option value="days">Dias</option>
+                    <option value="months">Meses</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Delay Node Fields */}
         {selectedNode.type === 'delay' && (
           <div className="space-y-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Tempo de Espera (Segundos)
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={30}
-                value={data.delaySeconds || 2}
-                onChange={(e) =>
-                  onUpdateData(selectedNode.id, { delaySeconds: Number(e.target.value) || 1 })
-                }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500"
-              />
+            <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 flex gap-2">
+              <Info className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-slate-700 leading-relaxed">
+                A espera é salva na sessão e retomada pelo agendador. Nenhuma Promise ou requisição fica aberta, mesmo durante dias ou após reiniciar o servidor.
+              </p>
             </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Tipo de espera</label>
+              <select
+                value={data.delayMode || 'duration'}
+                onChange={(e) => onUpdateData(selectedNode.id, { delayMode: e.target.value as 'duration' | 'until' })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+              >
+                <option value="duration">Esperar por uma duração</option>
+                <option value="until">Esperar até uma data e hora</option>
+              </select>
+            </div>
+
+            {(data.delayMode || 'duration') === 'duration' ? (
+              <div className="grid grid-cols-[1fr_1.35fr] gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Duração</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={data.delayValue ?? data.delaySeconds ?? 2}
+                    onChange={(e) => onUpdateData(selectedNode.id, { delayValue: Math.max(1, Number(e.target.value) || 1) })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Unidade</label>
+                  <select
+                    value={data.delayUnit || 'seconds'}
+                    onChange={(e) => onUpdateData(selectedNode.id, { delayUnit: e.target.value as any })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="seconds">Segundos</option>
+                    <option value="minutes">Minutos</option>
+                    <option value="hours">Horas</option>
+                    <option value="days">Dias</option>
+                    <option value="months">Meses</option>
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Retomar em</label>
+                <input
+                  type="datetime-local"
+                  value={data.delayUntil || ''}
+                  onChange={(e) => onUpdateData(selectedNode.id, { delayUntil: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                />
+              </div>
+            )}
           </div>
         )}
 

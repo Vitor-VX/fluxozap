@@ -1,0 +1,70 @@
+{
+  "id": "flow_acc_1791749126850_4h93",
+  "name": "Fluxo - Número EUA 01",
+  "description": "Fluxo de automação oficial",
+  "triggerType": "all",
+  "triggerKeywords": [
+    "Olá, quero saber mais informações",
+    "oi",
+    "menu"
+  ],
+  "nodes": [
+    {
+      "id": "node_start",
+      "type": "start",
+      "position": {
+        "x": -94.84734552808207,
+        "y": -57.64220506812876
+      },
+      "data": {
+        "label": "Gatilho de Início",
+        "type": "start",
+        "triggerType": "all",
+        "triggerKeywords": [
+          "Olá, quero saber mais informações",
+          "oi",
+          "menu"
+        ],
+        "text": "Qualquer mensagem recebida (ou mensagem específica configurada)"
+      },
+      "measured": {
+        "width": 300,
+        "height": 123
+      },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_send_text_1791751679228",
+      "type": "send_text",
+      "position": {
+        "x": 344.3430622401984,
+        "y": 6.734935404506963
+      },
+      "data": {
+        "label": "Mensagem de Texto",
+        "type": "send_text",
+        "text": "Olá! Como posso ajudar você hoje?  {{nome}}"
+      },
+      "measured": {
+        "width": 286,
+        "height": 134
+      },
+      "selected": true,
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "node_start",
+      "target": "node_send_text_1791751679228",
+      "animated": true,
+      "style": {
+        "stroke": "#10b981",
+        "strokeWidth": 2.5
+      },
+      "id": "xy-edge__node_start-node_send_text_1791751679228"
+    }
+  ],
+  "updatedAt": "2026-10-11T20:50:40.810Z"
+}

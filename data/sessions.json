@@ -1,5 +1,5 @@
 {
-  "simulator_user": {
+  "unassigned::simulator_user": {
     "phoneNumber": "simulator_user",
     "activeFlowId": "flow_welcome",
     "currentNodeId": "node_wait_name",
@@ -7,7 +7,20 @@
     "variables": {
       "phone": "+55 11 99999-0000",
       "nome": "João Silva",
-      "interesse": "Sim, quero conversar"
+      "interesse": "Sim, quero conversar",
+      "whatsapp_nome": "João Silva",
+      "telefone": "+55 11 99999-0000",
+      "numero_whatsapp": "+55 11 99999-0000",
+      "data": "11/10/2026",
+      "data_atual": "11/10/2026",
+      "hora": "18:41:10",
+      "hora_atual": "18:41:10",
+      "data_hora": "11/10/2026 18:41:10",
+      "dia": "11",
+      "mes": "10",
+      "ano": "2026",
+      "dia_semana": "domingo",
+      "timestamp": "2026-10-11T22:41:10.689Z"
     },
     "history": [
       {
@@ -78,68 +91,360 @@
       }
     ],
     "updatedAt": "2026-10-10T15:15:45.783Z",
-    "waitingVariableName": "nome"
-  },
-  "5569993161840": {
-    "phoneNumber": "5569993161840",
-    "activeFlowId": "flow_welcome",
-    "currentNodeId": "node_wait_name",
-    "waitingForInput": true,
-    "variables": {
-      "phone": "5569993161840"
-    },
-    "history": [
-      {
-        "id": "msg_1791651612854_dnq01",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
-        "timestamp": "05:00 PM"
-      },
-      {
-        "id": "msg_1791651862838_8l54z",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
-        "timestamp": "05:04 PM"
-      },
-      {
-        "id": "msg_1791733906791_9tx7c",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
-        "timestamp": "03:51 PM"
-      }
-    ],
-    "updatedAt": "2026-10-11T15:51:48.962Z",
     "waitingVariableName": "nome",
     "isWindowOpen": false
   },
-  "5511999999999": {
-    "phoneNumber": "5511999999999",
-    "activeFlowId": "flow_welcome",
-    "currentNodeId": "node_welcome_msg",
+  "acc_meta_primary::simulator_user": {
+    "phoneNumber": "simulator_user",
+    "name": "Simulador WhatsApp",
+    "accountId": "acc_meta_primary",
+    "accountPhoneNumberId": "1409320238929366",
+    "activeFlowId": "flow_acc_meta_primary",
+    "currentNodeId": null,
     "waitingForInput": false,
     "variables": {
-      "phone": "5511999999999"
+      "nome": "Simulador WhatsApp",
+      "whatsapp_nome": "Simulador WhatsApp",
+      "telefone": "+55 11 99999-0000",
+      "phone": "+55 11 99999-0000",
+      "numero_whatsapp": "+55 11 99999-0000",
+      "data": "11/10/2026",
+      "data_atual": "11/10/2026",
+      "hora": "18:55:18",
+      "hora_atual": "18:55:18",
+      "data_hora": "11/10/2026 18:55:18",
+      "dia": "11",
+      "mes": "10",
+      "ano": "2026",
+      "dia_semana": "domingo",
+      "timestamp": "2026-10-11T22:55:18.522Z",
+      "teste_resposta": "sim"
     },
     "history": [
       {
-        "id": "msg_1791652678344_plquv",
-        "sender": "bot",
+        "id": "msg_1791759316485_9lnf0",
+        "sender": "user",
         "type": "text",
-        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
-        "timestamp": "05:17 PM"
+        "content": "sim",
+        "timestamp": "18:55"
       },
       {
-        "id": "msg_1791652688810_1yk9a",
+        "id": "msg_1791759316485_qh18t",
         "sender": "bot",
         "type": "text",
-        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
-        "timestamp": "05:18 PM"
+        "content": "RESPOSTA_RECEBIDA_OK",
+        "timestamp": "18:55"
       }
     ],
-    "updatedAt": "2026-10-10T17:18:09.116Z",
-    "isWindowOpen": false
+    "isWindowOpen": true,
+    "windowType": "24h_standard",
+    "windowExpiresAt": "2026-10-12T22:55:16.485Z",
+    "botPaused": false,
+    "flowCompleted": true,
+    "autoDeleteDays": 7,
+    "createdAt": "2026-10-11T22:55:14.456Z",
+    "updatedAt": "2026-10-11T22:55:16.485Z",
+    "executionCheckpointVersion": 1,
+    "lastCustomerMessageAt": "2026-10-11T22:55:16.485Z"
+  },
+  "acc_1791749126850_4h93::simulator_user": {
+    "phoneNumber": "simulator_user",
+    "accountId": "acc_1791749126850_4h93",
+    "accountPhoneNumberId": "1350788331451176",
+    "activeFlowId": "flow_acc_1791749126850_4h93",
+    "currentNodeId": null,
+    "waitingForInput": false,
+    "variables": {
+      "nome": "Cliente WhatsApp",
+      "whatsapp_nome": "Cliente WhatsApp",
+      "telefone": "+55 11 99999-0000",
+      "phone": "+55 11 99999-0000",
+      "numero_whatsapp": "+55 11 99999-0000",
+      "data": "11/10/2026",
+      "data_atual": "11/10/2026",
+      "hora": "18:41:10",
+      "hora_atual": "18:41:10",
+      "data_hora": "11/10/2026 18:41:10",
+      "dia": "11",
+      "mes": "10",
+      "ano": "2026",
+      "dia_semana": "domingo",
+      "timestamp": "2026-10-11T22:41:10.694Z"
+    },
+    "history": [],
+    "lastCustomerMessageAt": "2026-10-11T20:57:24.671Z",
+    "windowExpiresAt": "2026-10-12T20:57:24.671Z",
+    "windowType": "24h_standard",
+    "isWindowOpen": true,
+    "botPaused": false,
+    "flowCompleted": false,
+    "autoDeleteDays": 7,
+    "autoDeleteAt": "2026-10-18T20:57:24.671Z",
+    "createdAt": "2026-10-11T20:57:24.671Z",
+    "updatedAt": "2026-10-11T20:57:24.671Z"
+  },
+  "acc_1791749126850_4h93::556993161840": {
+    "phoneNumber": "556993161840",
+    "accountId": "acc_1791749126850_4h93",
+    "accountPhoneNumberId": "1350788331451176",
+    "activeFlowId": "flow_acc_1791749126850_4h93",
+    "currentNodeId": "node_send_text_1791751679228",
+    "waitingForInput": false,
+    "variables": {
+      "nome": "V",
+      "whatsapp_nome": "V",
+      "telefone": "556993161840",
+      "phone": "556993161840",
+      "numero_whatsapp": "556993161840",
+      "data": "11/10/2026",
+      "data_atual": "11/10/2026",
+      "hora": "18:41:10",
+      "hora_atual": "18:41:10",
+      "data_hora": "11/10/2026 18:41:10",
+      "dia": "11",
+      "mes": "10",
+      "ano": "2026",
+      "dia_semana": "domingo",
+      "timestamp": "2026-10-11T22:41:10.694Z"
+    },
+    "history": [
+      {
+        "id": "msg_1791757317163_j7blm",
+        "sender": "user",
+        "type": "text",
+        "content": "oi",
+        "timestamp": "18:21"
+      },
+      {
+        "id": "msg_1791757317164_vt5sh",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?  V",
+        "timestamp": "18:21"
+      }
+    ],
+    "lastCustomerMessageAt": "2026-10-11T22:21:57.163Z",
+    "windowExpiresAt": "2026-10-12T22:21:57.163Z",
+    "windowType": "24h_standard",
+    "isWindowOpen": true,
+    "botPaused": false,
+    "flowCompleted": false,
+    "autoDeleteDays": 7,
+    "autoDeleteAt": "2026-10-18T22:21:57.162Z",
+    "createdAt": "2026-10-11T22:21:57.162Z",
+    "updatedAt": "2026-10-11T22:21:57.586Z",
+    "name": "V"
+  },
+  "acc_meta_primary::556993161840": {
+    "phoneNumber": "556993161840",
+    "accountId": "acc_meta_primary",
+    "accountPhoneNumberId": "1409320238929366",
+    "activeFlowId": "flow_acc_meta_primary",
+    "currentNodeId": null,
+    "waitingForInput": false,
+    "variables": {
+      "nome": "V",
+      "whatsapp_nome": "V",
+      "telefone": "556993161840",
+      "phone": "556993161840",
+      "numero_whatsapp": "556993161840",
+      "data": "11/10/2026",
+      "data_atual": "11/10/2026",
+      "hora": "19:23:47",
+      "hora_atual": "19:23:47",
+      "data_hora": "11/10/2026 19:23:47",
+      "dia": "11",
+      "mes": "10",
+      "ano": "2026",
+      "dia_semana": "domingo",
+      "timestamp": "2026-10-11T23:23:47.990Z",
+      "xpag_external_id": "FZ-1791761027990-a99d0c52-586e10c9f3-1b622b3a",
+      "xpag_transaction_id": "pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c",
+      "xpag_payment_status": "pending",
+      "xpag_method": "OXXO",
+      "xpag_currency": "MXN",
+      "xpag_account_id": "acc_meta_primary",
+      "xpag_e2e": "",
+      "xpag_status": "pending",
+      "xpag_amount": "100",
+      "xpag_provider": "XPag",
+      "xpag_fee": "10",
+      "xpag_request_number": "pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c",
+      "xpag_pix_copy_paste": "8203650015594682",
+      "xpag_qr_code_url": "https://quickchart.io/qr?size=440&text=8203650015594682",
+      "xpag_clabe": "",
+      "xpag_bank": "",
+      "xpag_beneficiary": "",
+      "xpag_reference": "8203650015594682",
+      "xpag_oxxo_reference": "8203650015594682",
+      "xpag_oxxo_barcode": "https://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png",
+      "xpag_checkout_url": "",
+      "xpag_deposit_address": "",
+      "xpag_transfer_type": "REFERENCE",
+      "xpag_expire_minutes": "17280",
+      "xpag_expires_at": "2026-10-23T23:23:49.064Z",
+      "xpag_paid_at": "",
+      "xpag_error": "",
+      "xpag_error_code": "",
+      "xpag_raw_response": "{\"ok\":true,\"provider\":\"XPag\",\"currency\":\"MXN\",\"amount\":100,\"fee\":10,\"qr\":\"8203650015594682\",\"copy_paste\":\"8203650015594682\",\"copyPaste\":\"8203650015594682\",\"code\":\"8203650015594682\",\"deposit_address\":\"\",\"qr_img\":\"\",\"qr_url\":\"https://quickchart.io/qr?size=440&text=8203650015594682\",\"clabe\":\"\",\"bank_name\":\"\",\"beneficiary\":\"\",\"barcode\":\"https://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png\",\"voucher_reference\":\"8203650015594682\",\"checkout_url\":\"\",\"payee_data\":{\"transferType\":\"REFERENCE\",\"reference\":\"8203650015594682\",\"barcode\":\"https://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png\",\"transfer_type\":\"REFERENCE\"},\"transfer_type\":\"REFERENCE\",\"awaiting_instruction\":false,\"method\":\"OXXO\",\"method_requested\":\"OXXO\",\"breb_key\":\"\",\"request_number\":\"pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c\",\"transaction_id\":\"pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c\",\"external_id\":\"FZ-1791761027990-a99d0c52-586e10c9f3-1b622b3a\",\"expire_minutes\":17280,\"status\":\"pending\"}"
+    },
+    "history": [
+      {
+        "id": "msg_1791757475591_hoji0",
+        "sender": "user",
+        "type": "text",
+        "content": "oi",
+        "timestamp": "18:24"
+      },
+      {
+        "id": "msg_1791757475591_f7thf",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "18:24"
+      },
+      {
+        "id": "xpag_barcode_1791757477062",
+        "sender": "bot",
+        "type": "image",
+        "content": "QR Code para pagamento via PIX",
+        "mediaUrl": "https://quickchart.io/qr?size=440&text=00020101021226640014br.gov.bcb.pix2542pix.magenpay.io%2Fcob%2FpxkpC1WZTXOcYmVe9OhNMA5204000053039865802BR5925NFCT%20TECNOLOGIA%20E%20SERVICO6009SAO%20PAULO62070503%2A%2A%2A63043CC5",
+        "timestamp": "18:24"
+      },
+      {
+        "id": "xpag_instruction_1791757479292",
+        "sender": "bot",
+        "type": "text",
+        "content": "💠 *Cobrança PIX gerada*\nValor: *R$ 1,00*\n*PIX Copia e Cola:*\n00020101021226640014br.gov.bcb.pix2542pix.magenpay.io/cob/pxkpC1WZTXOcYmVe9OhNMA5204000053039865802BR5925NFCT TECNOLOGIA E SERVICO6009SAO PAULO62070503***63043CC5\nVocê receberá a confirmação aqui assim que o pagamento for identificado.",
+        "timestamp": "18:24"
+      },
+      {
+        "id": "xpag_confirmed_1791757556054",
+        "sender": "bot",
+        "type": "text",
+        "content": "✅ ¡Pago confirmado! Gracias. Continuaremos con tu atención.",
+        "timestamp": "18:25"
+      },
+      {
+        "id": "msg_1791757556788_ycet4",
+        "sender": "bot",
+        "type": "text",
+        "content": "Obrigado pelo pagamento!!",
+        "timestamp": "18:25"
+      },
+      {
+        "id": "msg_1791757680478_rof2n",
+        "sender": "user",
+        "type": "text",
+        "content": "oi",
+        "timestamp": "18:28"
+      },
+      {
+        "id": "msg_1791757680478_qhnr6",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "18:28"
+      },
+      {
+        "id": "msg_1791757794446_tp698",
+        "sender": "user",
+        "type": "text",
+        "content": ".",
+        "timestamp": "18:29"
+      },
+      {
+        "id": "msg_1791757794446_1vo9l",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "18:29"
+      },
+      {
+        "id": "xpag_instruction_1791757796079",
+        "sender": "bot",
+        "type": "text",
+        "content": "🏦 *Pago SPEI generado*\nImporte exacto: *$70.00*\nCLABE: *734180009427210893*\nBanco: STP · Finco Pay · Transfer\nBeneficiario: Zypher Servicos\nRealiza la transferencia por SPEI usando estos datos. Te avisaremos aquí cuando se confirme.",
+        "timestamp": "18:29"
+      },
+      {
+        "id": "msg_1791760698095_okh5f",
+        "sender": "user",
+        "type": "text",
+        "content": ".",
+        "timestamp": "19:18"
+      },
+      {
+        "id": "msg_1791760698095_8mbta",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "19:18"
+      },
+      {
+        "id": "msg_1791760699901_h31lz",
+        "sender": "bot",
+        "type": "text",
+        "content": "Pedido gerado!!",
+        "timestamp": "19:18"
+      },
+      {
+        "id": "msg_1791760927339_49uz8",
+        "sender": "user",
+        "type": "text",
+        "content": "oi",
+        "timestamp": "19:22"
+      },
+      {
+        "id": "msg_1791760927339_mxjkl",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "19:22"
+      },
+      {
+        "id": "msg_1791760928971_2zjmc",
+        "sender": "bot",
+        "type": "text",
+        "content": "Pedido gerado!!\n\nClabe: **734180009425867141**",
+        "timestamp": "19:22"
+      },
+      {
+        "id": "msg_1791761027279_7q7f1",
+        "sender": "user",
+        "type": "text",
+        "content": "oi",
+        "timestamp": "19:23"
+      },
+      {
+        "id": "msg_1791761027280_0qdoy",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "19:23"
+      },
+      {
+        "id": "msg_1791761029066_jgdt0",
+        "sender": "bot",
+        "type": "text",
+        "content": "Pedido gerado!!\n\nClabe: ****\n\n8203650015594682\n\nhttps://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png\n\n\n\n",
+        "timestamp": "19:23"
+      }
+    ],
+    "lastCustomerMessageAt": "2026-10-11T23:23:47.279Z",
+    "windowExpiresAt": "2026-10-12T23:23:47.279Z",
+    "windowType": "24h_standard",
+    "isWindowOpen": true,
+    "botPaused": false,
+    "flowCompleted": true,
+    "autoDeleteDays": 7,
+    "autoDeleteAt": "2026-10-18T22:24:35.590Z",
+    "createdAt": "2026-10-11T22:24:35.590Z",
+    "updatedAt": "2026-10-11T23:23:49.731Z",
+    "name": "V",
+    "waitingForPayment": true,
+    "waitingPaymentExternalId": "FZ-1791761027990-a99d0c52-586e10c9f3-1b622b3a",
+    "waitingPaymentNodeId": "node_xpag_payment_1791757425167",
+    "executionCheckpointVersion": 1
   }
 }

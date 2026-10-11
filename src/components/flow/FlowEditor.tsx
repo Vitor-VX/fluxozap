@@ -21,6 +21,7 @@ import { VideoNode } from './VideoNode';
 import { WaitReplyNode } from './WaitReplyNode';
 import { DelayNode } from './DelayNode';
 import { ConditionNode } from './ConditionNode';
+import { XPagPaymentNode } from './XPagPaymentNode';
 import { NodeSidebar } from './NodeSidebar';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { NodeType, FlowNodeData } from '../../types/flow';
@@ -53,6 +54,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
       send_document: DocumentNode,
       send_audio: AudioNode,
       send_video: VideoNode,
+      xpag_payment: XPagPaymentNode,
       wait_reply: WaitReplyNode,
       delay: DelayNode,
       condition: ConditionNode,
@@ -82,7 +84,22 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
           return node;
         });
         setNodes(loadedNodes);
-        setEdges(data.edges || []);
+        const nodeTypeById = new Map(loadedNodes.map((node: Node) => [node.id, node.type]));
+        const loadedEdges = (data.edges || []).map((edge: Edge) => {
+          // Before payment branches existed, the only edge meant “continue after payment”.
+          // Preserve that behavior and anchor it visually to the new Paga handle.
+          if (nodeTypeById.get(edge.source) === 'xpag_payment' && !edge.sourceHandle) {
+            return { ...edge, sourceHandle: 'paid' };
+          }
+          if (nodeTypeById.get(edge.source) === 'wait_reply' && !edge.sourceHandle) {
+            return { ...edge, sourceHandle: 'answered' };
+          }
+          if (nodeTypeById.get(edge.source) === 'delay' && !edge.sourceHandle) {
+            return { ...edge, sourceHandle: 'completed' };
+          }
+          return edge;
+        });
+        setEdges(loadedEdges);
       }
     } catch (err) {
       console.error('Error loading flow:', err);
@@ -185,15 +202,36 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
       initialData = {
         label: 'Aguardar Resposta',
         type,
-        variableName: 'resposta',
+        variableName: '',
         expectedType: 'text',
         placeholder: 'Aguardando o contato responder...',
+        waitReplyTimeoutEnabled: false,
+        waitReplyTimeoutValue: 15,
+        waitReplyTimeoutUnit: 'minutes',
+      };
+    } else if (type === 'xpag_payment') {
+      initialData = {
+        label: 'Gerar Pagamento',
+        type,
+        xpagMethod: 'PIX',
+        xpagAmount: '50.00',
+        xpagPayerName: '',
+        xpagPayerEmail: '',
+        xpagPayerDocument: '',
+        xpagDescription: '',
+        xpagWaitForPayment: true,
+        xpagVariablePrefix: 'xpag',
+        xpagExpirationMinutes: undefined,
       };
     } else if (type === 'delay') {
       initialData = {
         label: 'Aguardar Tempo',
         type,
         delaySeconds: 2,
+        delayMode: 'duration',
+        delayValue: 2,
+        delayUnit: 'seconds',
+        delayUntil: '',
       };
     } else if (type === 'condition') {
       initialData = {
@@ -333,6 +371,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
       {/* Node Properties Panel (shows when a node is clicked) */}
       {selectedNode && (
         <NodeConfigPanel
+          accountId={accountId}
           selectedNode={selectedNode}
           onUpdateData={handleUpdateNodeData}
           onDeleteNode={handleDeleteNode}

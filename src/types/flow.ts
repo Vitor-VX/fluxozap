@@ -5,6 +5,7 @@ export type NodeType =
   | 'send_document'
   | 'send_audio'
   | 'send_video'
+  | 'xpag_payment'
   | 'wait_reply'
   | 'condition'
   | 'delay';
@@ -12,7 +13,7 @@ export type NodeType =
 export interface WhatsAppAccount {
   id: string; // ex: "acc_principal", "acc_vendas_2"
   name: string; // ex: "Comercial / Vendas Principal"
-  phoneNumber: string; // ex: "+55 11 98765-4321"
+  phoneNumber: string; // ex: "+55 11 99999-9999"
   phoneNumberId: string; // Meta Phone Number ID
   wabaId?: string; // WhatsApp Business Account ID
   accessToken?: string; // Token específico (ou usa o global se vazio)
@@ -79,7 +80,10 @@ export interface FlowNodeData {
   text?: string;
   
   // Media node properties
+  mediaId?: string;
   mediaUrl?: string;
+  mediaMimeType?: string;
+  mediaSize?: number;
   caption?: string;
   filename?: string;
 
@@ -87,6 +91,9 @@ export interface FlowNodeData {
   variableName?: string;
   expectedType?: 'text' | 'number' | 'email';
   placeholder?: string;
+  waitReplyTimeoutEnabled?: boolean;
+  waitReplyTimeoutValue?: number;
+  waitReplyTimeoutUnit?: 'seconds' | 'minutes' | 'hours' | 'days' | 'months';
 
   // Condition node properties
   conditionVariable?: string;
@@ -95,6 +102,21 @@ export interface FlowNodeData {
 
   // Delay node properties
   delaySeconds?: number;
+  delayMode?: 'duration' | 'until';
+  delayValue?: number;
+  delayUnit?: 'seconds' | 'minutes' | 'hours' | 'days' | 'months';
+  delayUntil?: string;
+
+  // XPag Global payment block (Brazil and Mexico)
+  xpagMethod?: 'PIX' | 'SPEI' | 'OXXO';
+  xpagAmount?: string;
+  xpagPayerName?: string;
+  xpagPayerEmail?: string;
+  xpagPayerDocument?: string;
+  xpagDescription?: string;
+  xpagWaitForPayment?: boolean;
+  xpagVariablePrefix?: string;
+  xpagExpirationMinutes?: number;
 
   // Index signature for React Flow compatibility
   [key: string]: any;
@@ -102,6 +124,7 @@ export interface FlowNodeData {
 
 export interface MetaConfig {
   phoneNumberId: string;
+  displayPhoneNumber?: string;
   accessToken: string;
   wabaId: string;
   verifyToken: string;
@@ -153,6 +176,14 @@ export interface UserSession {
   currentNodeId: string | null;
   waitingForInput: boolean;
   waitingVariableName?: string;
+  waitingForPayment?: boolean;
+  waitingPaymentExternalId?: string;
+  waitingPaymentNodeId?: string;
+  waitingUntil?: string;
+  waitingNodeId?: string;
+  waitingKind?: 'delay' | 'reply_timeout';
+  waitingIsLiveWhatsApp?: boolean;
+  executionCheckpointVersion?: number;
   variables: Record<string, string>;
   history: ChatMessage[];
   updatedAt: string;
@@ -194,6 +225,9 @@ export interface ApiLogEntry {
   type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'error';
   direction: 'outbound' | 'inbound';
   endpoint: string;
+  accountId?: string;
+  accountName?: string;
+  phoneNumberId?: string;
   recipient?: string;
   sender?: string;
   messageType?: string;
@@ -218,6 +252,8 @@ export interface MongoStatus {
   pingMs?: number;
   documentsCount?: number;
   modelName: string;
+  collections?: string[];
+  collectionCounts?: Record<string, number>;
   error?: string;
   lastConnectedAt?: string;
 }

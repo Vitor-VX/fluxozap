@@ -1,3 +1,4 @@
 {
-  "uri": "mongodb+srv://victor-vx:Joao55691569@bancodedadosvitor-vx.6awlvqi.mongodb.net/?retryWrites=true&w=majority"
+  "uri": "mongodb+srv://victor-vx:Joao55691569@bancodedadosvitor-vx.6awlvqi.mongodb.net/?retryWrites=true&w=majority",
+  "databaseName": "FluxoZap"
 }

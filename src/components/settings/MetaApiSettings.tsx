@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Key,
   Smartphone,
@@ -17,9 +17,11 @@ import { MetaConfig } from '../../types/flow';
 
 interface MetaApiSettingsProps {
   onOpenLogs?: () => void;
+  onConnectionUpdated?: () => void;
+  activeAccountId?: string;
 }
 
-export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) => {
+export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs, onConnectionUpdated, activeAccountId }) => {
   const [config, setConfig] = useState<MetaConfig>({
     phoneNumberId: '',
     accessToken: '',
@@ -46,21 +48,27 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
     metaResponse?: any;
   } | null>(null);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [activeAccountName, setActiveAccountName] = useState('');
+  const activeAccountRef = useRef(activeAccountId);
 
   const webhookUrl = `${window.location.origin}/api/webhook`;
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch('/api/config');
+      if (!activeAccountId) return;
+      const res = await fetch(`/api/config?accountId=${encodeURIComponent(activeAccountId)}`);
       if (res.ok) {
         const data = await res.json();
-        setConfig((prev) => ({
-          ...prev,
+        if (activeAccountRef.current !== activeAccountId) return;
+        setConfig({
           phoneNumberId: data.phoneNumberId || '',
+          displayPhoneNumber: data.displayPhoneNumber || '',
+          accessToken: '',
           wabaId: data.wabaId || '',
           verifyToken: data.verifyToken || 'fluxozap_webhook_secret_2026',
           testPhoneNumber: data.testPhoneNumber || '',
-        }));
+        });
+        setActiveAccountName(data.accountName || '');
         setMaskedToken(data.maskedToken || '');
         setHasAccessToken(data.hasAccessToken);
       }
@@ -70,8 +78,14 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
   };
 
   useEffect(() => {
+    activeAccountRef.current = activeAccountId;
+    setTestResult(null);
+    setSendLiveResult(null);
+    setMaskedToken('');
+    setHasAccessToken(false);
+    setActiveAccountName('');
     fetchConfig();
-  }, []);
+  }, [activeAccountId]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,7 +96,7 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ ...config, accountId: activeAccountId }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -90,7 +104,8 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
           success: true,
           message: 'Configurações da Meta WhatsApp API salvas com sucesso!',
         });
-        fetchConfig();
+        await fetchConfig();
+        onConnectionUpdated?.();
       } else {
         setTestResult({
           success: false,
@@ -115,6 +130,7 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
         body: JSON.stringify({
           phoneNumberId: config.phoneNumberId,
           accessToken: config.accessToken,
+          accountId: activeAccountId,
         }),
       });
       const data = await res.json();
@@ -124,6 +140,8 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
           message: data.message,
           details: data.data,
         });
+        await fetchConfig();
+        onConnectionUpdated?.();
       } else {
         setTestResult({
           success: false,
@@ -158,7 +176,7 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
       const res = await fetch('/api/send-live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: config.testPhoneNumber }),
+        body: JSON.stringify({ phoneNumber: config.testPhoneNumber, accountId: activeAccountId }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -203,6 +221,9 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
               <h2 className="text-lg font-bold text-slate-900">
                 Integração WhatsApp Cloud API (Oficial da Meta)
               </h2>
+              <p className="text-xs text-emerald-700 font-semibold mt-0.5">
+                Configurando: {activeAccountName || 'linha selecionada'}
+              </p>
               <p className="text-xs text-slate-500 mt-0.5">
                 Configure as credenciais da Meta Developers para envio automático de mensagens e recebimento de respostas no WhatsApp Oficial.
               </p>
@@ -230,6 +251,23 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs }) 
           <p className="text-xs text-slate-500 mb-5">
             Obtidas em <strong>Meta for Developers</strong> &gt; Seu Aplicativo &gt; WhatsApp &gt; Configuração da API.
           </p>
+
+          <div className={`mb-5 p-3.5 rounded-xl border ${
+            config.displayPhoneNumber
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}>
+            <p className="text-xs font-bold">
+              {config.displayPhoneNumber
+                ? `Número conectado pela Meta: ${config.displayPhoneNumber}`
+                : 'Nenhum número validado e conectado'}
+            </p>
+            <p className="text-[11px] mt-1 leading-relaxed opacity-80">
+              {config.displayPhoneNumber
+                ? 'Esta linha usa exatamente o display_phone_number retornado pela API da Meta para o Phone Number ID abaixo.'
+                : 'Salve as credenciais desta linha e use “Testar Conexão”. O número real aparecerá depois que a Meta validar este Phone Number ID.'}
+            </p>
+          </div>
 
           <form onSubmit={handleSave} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

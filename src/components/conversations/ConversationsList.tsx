@@ -41,18 +41,15 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'ads' | 'open_window' | 'paused'>('all');
-  const [accountFilter, setAccountFilter] = useState<string>('all');
-
-  useEffect(() => {
-    if (activeAccountId) {
-      setAccountFilter(activeAccountId);
-    }
-  }, [activeAccountId]);
+  const [showCollectedVariables, setShowCollectedVariables] = useState(false);
+  const activeAccountRef = useRef(activeAccountId);
 
   // Agent chat input state
   const [agentText, setAgentText] = useState('');
   const [agentMediaType, setAgentMediaType] = useState<'text' | 'image' | 'document'>('text');
+  const [agentMediaId, setAgentMediaId] = useState('');
   const [agentMediaUrl, setAgentMediaUrl] = useState('');
+  const [agentMediaMimeType, setAgentMediaMimeType] = useState('');
   const [agentCaption, setAgentCaption] = useState('');
   const [agentFilename, setAgentFilename] = useState('');
   const [isSendingAgent, setIsSendingAgent] = useState(false);
@@ -66,22 +63,25 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
   // Auto-scroll chat
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  const fetchSessions = async (silent: boolean = false) => {
+  const fetchSessions = async (silent: boolean = false, accountId: string | undefined = activeAccountId) => {
     if (!silent) setIsLoading(true);
     try {
-      const res = await fetch('/api/sessions');
+      if (!accountId) {
+        setSessions([]);
+        setSelectedSession(null);
+        return;
+      }
+      const res = await fetch(`/api/sessions?accountId=${encodeURIComponent(accountId)}`);
       if (res.ok) {
         const data: UserSession[] = await res.json();
+        if (activeAccountRef.current !== accountId) return;
         setSessions(data);
 
-        // Keep current selected session updated
-        if (data.length > 0) {
-          setSelectedSession((prev) => {
-            if (!prev) return data[0];
-            const found = data.find((s) => s.phoneNumber === prev.phoneNumber);
-            return found || data[0];
-          });
-        }
+        // Never carry a chat from one WhatsApp line into another line's context.
+        setSelectedSession((prev) => {
+          if (!prev || prev.accountId !== accountId) return null;
+          return data.find((s) => s.phoneNumber === prev.phoneNumber && s.accountId === accountId) || null;
+        });
       }
     } catch (err) {
       console.error('Error fetching sessions:', err);
@@ -91,10 +91,22 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
   };
 
   useEffect(() => {
-    fetchSessions();
-    const interval = setInterval(() => fetchSessions(true), 4000);
+    activeAccountRef.current = activeAccountId;
+    setSessions([]);
+    setSelectedSession(null);
+    setShowCollectedVariables(false);
+    setAgentText('');
+    if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
+    setAgentMediaId('');
+    setAgentMediaUrl('');
+    setAgentMediaMimeType('');
+    setAgentCaption('');
+    setAgentFilename('');
+    setSendError(null);
+    fetchSessions(false, activeAccountId);
+    const interval = setInterval(() => fetchSessions(true, activeAccountId), 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeAccountId]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -130,8 +142,13 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
   const handleSendAgentMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSession) return;
+    if (!activeAccountId || selectedSession.accountId !== activeAccountId) {
+      setSendError('A conversa não pertence à linha selecionada. Selecione novamente o cliente nesta linha.');
+      setSelectedSession(null);
+      return;
+    }
     if (agentMediaType === 'text' && !agentText.trim()) return;
-    if (agentMediaType !== 'text' && !agentMediaUrl.trim()) return;
+    if (agentMediaType !== 'text' && !agentMediaId && !agentMediaUrl.trim()) return;
 
     setIsSendingAgent(true);
     setSendError(null);
@@ -143,10 +160,13 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
         body: JSON.stringify({
           type: agentMediaType,
           text: agentText,
-          mediaUrl: agentMediaUrl,
+          mediaId: agentMediaId,
+          mediaUrl: agentMediaId ? undefined : agentMediaUrl,
+          mediaMimeType: agentMediaMimeType,
           caption: agentCaption,
           filename: agentFilename,
           pauseBot: true, // Agent takes over
+          accountId: selectedSession.accountId,
         }),
       });
 
@@ -154,7 +174,10 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
       if (res.ok) {
         setSelectedSession(data.session);
         setAgentText('');
+        if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
+        setAgentMediaId('');
         setAgentMediaUrl('');
+        setAgentMediaMimeType('');
         setAgentCaption('');
         setAgentFilename('');
         setAgentMediaType('text');
@@ -175,6 +198,8 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     try {
       const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}/toggle-bot`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: selectedSession.accountId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -186,53 +211,48 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     }
   };
 
-  // File Upload to Cloudflare R2 / Local Server
+  // Upload outgoing files directly to Meta. Nothing is persisted in R2/local storage.
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 100 * 1024 * 1024) {
+      setSendError('O arquivo excede o limite máximo de 100 MB.');
+      e.target.value = '';
+      return;
+    }
 
     setIsUploadingFile(true);
     setSendError(null);
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64 = reader.result as string;
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: file.name,
-            fileData: base64,
-            mimeType: file.type,
-          }),
-        });
-
-        const data = await res.json();
-        if (res.ok && data.url) {
-          setAgentMediaUrl(data.url);
-          setAgentFilename(data.filename || file.name);
-          if (file.type.startsWith('image/')) {
-            setAgentMediaType('image');
-          } else {
-            setAgentMediaType('document');
-          }
-        } else {
-          setSendError(data.error || 'Erro ao enviar arquivo para o storage.');
-        }
-      } catch (err: any) {
-        setSendError(err.message || 'Falha no upload do arquivo.');
-      } finally {
-        setIsUploadingFile(false);
+    try {
+      const res = await fetch(`/api/meta/media?accountId=${encodeURIComponent(activeAccountId || '')}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-File-Name': encodeURIComponent(file.name),
+          'X-File-Type': file.type || 'application/octet-stream',
+        },
+        body: file,
+      });
+      const raw = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(raw); } catch { data = { error: raw }; }
+      if (!res.ok || !data.mediaId) {
+        setSendError(data.error || 'A Meta recusou o upload do arquivo.');
+        return;
       }
-    };
-
-    reader.onerror = () => {
+      if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
+      setAgentMediaId(data.mediaId);
+      setAgentMediaMimeType(data.mimeType || file.type);
+      setAgentMediaUrl(URL.createObjectURL(file));
+      setAgentFilename(data.filename || file.name);
+      setAgentMediaType(file.type.startsWith('image/') ? 'image' : 'document');
+    } catch (err: any) {
+      setSendError(err.message || 'Falha no upload direto para a Meta.');
+    } finally {
       setIsUploadingFile(false);
-      setSendError('Erro ao ler arquivo local.');
-    };
-
-    reader.readAsDataURL(file);
+      e.target.value = '';
+    }
   };
 
   // Simulate Meta Ads Lead with 72h window
@@ -242,9 +262,10 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phoneNumber: '+55 11 98765-4321',
+          phoneNumber: '+55 11 99999-9999',
           headline: 'Campanha Meta Ads - Janela 72 Horas',
           adId: `ad_${Date.now().toString().slice(-6)}`,
+          accountId: activeAccountId,
         }),
       });
       if (res.ok) {
@@ -268,7 +289,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
       const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}/restart-flow`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ triggerNow }),
+        body: JSON.stringify({ triggerNow, accountId: selectedSession.accountId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -292,11 +313,11 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     if (!confirm(`Tem certeza que deseja EXCLUIR o lead ${selectedSession.phoneNumber} e todo o histórico?`)) return;
 
     try {
-      const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}`, {
+      const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}?accountId=${encodeURIComponent(selectedSession.accountId || '')}`, {
         method: 'DELETE',
       });
       if (res.ok) {
-        setSessions((prev) => prev.filter((s) => s.phoneNumber !== selectedSession.phoneNumber));
+        setSessions((prev) => prev.filter((s) => !(s.phoneNumber === selectedSession.phoneNumber && s.accountId === selectedSession.accountId)));
         setSelectedSession(null);
         fetchSessions(true);
       }
@@ -313,6 +334,8 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     try {
       const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}/clear-history`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: selectedSession.accountId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -339,7 +362,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
 
   // Filter sessions
   const filteredSessions = sessions.filter((s) => {
-    if (accountFilter !== 'all' && s.accountId && s.accountId !== accountFilter) {
+    if (!activeAccountId || s.accountId !== activeAccountId) {
       return false;
     }
 
@@ -403,22 +426,16 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
             </div>
           </div>
 
-          {/* Account / Line Filter if multiple accounts exist */}
-          {accounts && accounts.length > 1 && (
+          {/* The global line selector controls this page's complete context. */}
+          {activeAccountId && (
             <div className="flex items-center gap-1.5 p-1 bg-slate-50 border border-slate-200 rounded-lg">
               <span className="text-[10px] font-bold text-slate-500 pl-1 uppercase">Linha:</span>
-              <select
-                value={accountFilter}
-                onChange={(e) => setAccountFilter(e.target.value)}
-                className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-slate-800 text-[11px] font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              >
-                <option value="all">Todas as Linhas ({accounts.length})</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.phoneNumber || a.phoneNumberId})
-                  </option>
-                ))}
-              </select>
+              <span className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-slate-800 text-[11px] font-semibold truncate">
+                {accounts.find((account) => account.id === activeAccountId)?.name || 'Linha selecionada'}
+                {' · '}
+                {accounts.find((account) => account.id === activeAccountId)?.phoneNumber ||
+                  accounts.find((account) => account.id === activeAccountId)?.phoneNumberId}
+              </span>
             </div>
           )}
 
@@ -510,16 +527,19 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
             </div>
           ) : (
             filteredSessions.map((item) => {
-              const isSelected = selectedSession?.phoneNumber === item.phoneNumber;
+              const isSelected = selectedSession?.phoneNumber === item.phoneNumber && selectedSession?.accountId === item.accountId;
               const contactName = item.variables?.nome || item.name || item.phoneNumber;
               const lastMsg = item.history[item.history.length - 1];
               const windowInfo = getWindowInfo(item);
 
               return (
                 <button
-                  key={item.phoneNumber}
+                  key={`${item.accountId || 'unassigned'}::${item.phoneNumber}`}
                   type="button"
-                  onClick={() => setSelectedSession(item)}
+                  onClick={() => {
+                    setSelectedSession(item);
+                    setShowCollectedVariables(false);
+                  }}
                   className={`w-full text-left p-3 hover:bg-slate-50 transition-colors flex items-start gap-3 cursor-pointer ${
                     isSelected ? 'bg-emerald-50/70 border-r-2 border-emerald-600' : ''
                   }`}
@@ -645,6 +665,21 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
 
               {/* Action Buttons: Toggle Bot, Restart Flow, Delete */}
               <div className="flex items-center gap-2">
+                {selectedSession.variables && Object.keys(selectedSession.variables).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCollectedVariables((current) => !current)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${
+                      showCollectedVariables
+                        ? 'bg-teal-50 text-teal-800 border-teal-300'
+                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                    }`}
+                    title={showCollectedVariables ? 'Ocultar variáveis coletadas' : 'Mostrar variáveis coletadas'}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>{showCollectedVariables ? 'Ocultar variáveis' : 'Mostrar variáveis coletadas'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleToggleBot}
@@ -720,7 +755,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
             )}
 
             {/* Collected Variables Bar */}
-            {selectedSession.variables && Object.keys(selectedSession.variables).length > 0 && (
+            {showCollectedVariables && selectedSession.variables && Object.keys(selectedSession.variables).length > 0 && (
               <div className="bg-slate-50 border-b border-slate-200/80 px-6 py-2 flex items-center gap-2 overflow-x-auto text-[11px]">
                 <span className="text-slate-400 font-medium shrink-0">Variáveis Coletadas:</span>
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -960,28 +995,37 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                       </button>
                     </div>
 
-                    {/* Media preview if selected/uploaded */}
+                    {/* Media preview if uploaded directly to Meta */}
                     {agentMediaUrl && agentMediaType === 'image' && (
                       <div className="p-2 bg-white rounded-lg border border-slate-200 flex items-center gap-3">
                         <img src={agentMediaUrl} alt="Preview" className="w-12 h-12 object-cover rounded-md border" />
                         <div className="flex-1 overflow-hidden">
                           <p className="font-semibold text-slate-800 truncate">{agentFilename || 'imagem_selecionada.jpg'}</p>
-                          <p className="text-[10px] text-emerald-600 font-medium">Arquivo pronto para disparo no WhatsApp</p>
+                          <p className="text-[10px] text-emerald-600 font-medium">Arquivo enviado diretamente à Meta · não salvo no R2</p>
                         </div>
                       </div>
                     )}
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-0.5">
-                        URL da {agentMediaType === 'image' ? 'Imagem' : 'Documento'} (Cloudflare R2 ou HTTPS)
+                        URL externa da {agentMediaType === 'image' ? 'Imagem' : 'Documento'} (Opcional)
                       </label>
                       <input
                         type="text"
-                        value={agentMediaUrl}
-                        onChange={(e) => setAgentMediaUrl(e.target.value)}
-                        placeholder="https://pub-xxx.r2.dev/foto.jpg ou URL pública"
+                        value={agentMediaId ? '' : agentMediaUrl}
+                        onChange={(e) => {
+                          if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
+                          setAgentMediaId('');
+                          setAgentMediaMimeType('');
+                          setAgentMediaUrl(e.target.value);
+                        }}
+                        disabled={Boolean(agentMediaId)}
+                        placeholder={agentMediaId ? 'Arquivo local já preparado na Meta' : 'https://exemplo.com/arquivo.jpg'}
                         className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
                       />
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Arquivos do computador vão direto para a Meta. URLs externas são baixadas pelo servidor e reenviadas como mídia da Meta.
+                      </p>
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-0.5">Legenda / Texto Acompanhante</label>
@@ -998,7 +1042,10 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                         type="button"
                         onClick={() => {
                           setAgentMediaType('text');
+                          if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
+                          setAgentMediaId('');
                           setAgentMediaUrl('');
+                          setAgentMediaMimeType('');
                           setAgentCaption('');
                         }}
                         className="px-3 py-1 text-slate-600 hover:bg-slate-200 rounded cursor-pointer"
@@ -1007,7 +1054,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                       </button>
                       <button
                         type="submit"
-                        disabled={isSendingAgent || !agentMediaUrl.trim()}
+                        disabled={isSendingAgent || (!agentMediaId && !agentMediaUrl.trim())}
                         className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs"
                       >
                         {isSendingAgent ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}

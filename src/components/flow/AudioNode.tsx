@@ -49,15 +49,15 @@ export const AudioNode = ({ data, selected }: { data: any; selected?: boolean })
             <div className="flex items-center justify-between text-[10px] text-slate-500">
               <span className="font-mono">{data.durationStr || '0:24'}</span>
               <span className="truncate max-w-[110px] text-[10px] text-slate-400">
-                {data.filename || (data.mediaUrl ? 'audio_whatsapp.mp3' : 'Sem arquivo')}
+                {data.filename || (data.mediaId || data.mediaUrl ? 'audio_whatsapp.mp3' : 'Sem arquivo')}
               </span>
             </div>
           </div>
         </div>
 
-        {data.mediaUrl ? (
+        {data.mediaId || data.mediaUrl ? (
           <p className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200/60 truncate">
-            ✓ Áudio vinculado no R2/servidor
+            ✓ {data.mediaId ? 'Áudio pronto na Meta' : 'URL externa vinculada'}
           </p>
         ) : (
           <p className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200/60">

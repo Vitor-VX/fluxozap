@@ -16,7 +16,12 @@ import {
 } from 'lucide-react';
 import { ApiLogEntry } from '../../types/flow';
 
-export const LogsViewer: React.FC = () => {
+interface LogsViewerProps {
+  activeAccountId?: string;
+  activeAccountName?: string;
+}
+
+export const LogsViewer: React.FC<LogsViewerProps> = ({ activeAccountId, activeAccountName }) => {
   const [logs, setLogs] = useState<ApiLogEntry[]>([]);
   const [selectedLog, setSelectedLog] = useState<ApiLogEntry | null>(null);
   const [filter, setFilter] = useState<'all' | 'errors' | 'outbound' | 'inbound'>('all');
@@ -28,7 +33,9 @@ export const LogsViewer: React.FC = () => {
   const fetchLogs = async (silent: boolean = false) => {
     if (!silent) setIsLoading(true);
     try {
-      const res = await fetch(`/api/logs?filter=${filter}`);
+      const params = new URLSearchParams({ filter });
+      if (activeAccountId) params.set('accountId', activeAccountId);
+      const res = await fetch(`/api/logs?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setLogs(data.logs || []);
@@ -51,8 +58,10 @@ export const LogsViewer: React.FC = () => {
   };
 
   useEffect(() => {
+    setLogs([]);
+    setSelectedLog(null);
     fetchLogs();
-  }, [filter]);
+  }, [filter, activeAccountId]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -60,7 +69,7 @@ export const LogsViewer: React.FC = () => {
       fetchLogs(true);
     }, 3000);
     return () => clearInterval(interval);
-  }, [autoRefresh, filter]);
+  }, [autoRefresh, filter, activeAccountId]);
 
   const handleClearLogs = async () => {
     if (!confirm('Deseja realmente limpar todos os logs da API?')) return;
@@ -112,6 +121,12 @@ export const LogsViewer: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {activeAccountId && (
+            <div className="mb-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800 font-semibold truncate">
+              Linha: {activeAccountName || activeAccountId}
+            </div>
+          )}
 
           {/* Filter Tabs */}
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">

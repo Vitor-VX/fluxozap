@@ -112,14 +112,14 @@ export const R2StorageSettings: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-bold text-slate-900">
-                    Cloudflare R2 Storage (Mídias e Arquivos)
+                    Cloudflare R2 Storage (Mídias Recebidas)
                   </h2>
                   <span className="text-[11px] font-mono font-bold text-orange-800 bg-orange-100/80 px-2 py-0.5 rounded-md">
                     S3-Compatible
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Armazene áudios de voz, fotos, documentos e vídeos recebidos dos clientes ou enviados pelo atendente no Cloudflare R2 com tráfego gratuito (Zero Egress Fees).
+                  Armazene somente áudios, fotos, documentos e vídeos recebidos dos clientes. Arquivos enviados pelo atendente vão diretamente para a Meta e não passam pelo R2.
                 </p>
               </div>
             </div>

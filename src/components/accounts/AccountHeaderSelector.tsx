@@ -54,12 +54,12 @@ export const AccountHeaderSelector: React.FC<AccountHeaderSelectorProps> = ({
           }`}
         />
         <Smartphone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-        <div className="flex items-baseline gap-1.5 max-w-[170px] truncate text-left">
+        <div className="flex items-baseline gap-1.5 max-w-[230px] truncate text-left">
           <span className="font-bold text-slate-800 truncate">
             {activeAccount?.name || 'WhatsApp Padrão'}
           </span>
           <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
-            {activeAccount?.phoneNumber ? activeAccount.phoneNumber.slice(-4) : ''}
+            {activeAccount?.phoneNumber || ''}
           </span>
         </div>
         <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />

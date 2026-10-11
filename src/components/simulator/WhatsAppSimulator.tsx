@@ -15,9 +15,11 @@ import { UserSession } from '../../types/flow';
 
 interface WhatsAppSimulatorProps {
   onFlowModified?: () => void;
+  accountId?: string;
+  accountName?: string;
 }
 
-export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
+export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = ({ accountId, accountName }) => {
   const [session, setSession] = useState<UserSession | null>(null);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -31,8 +33,8 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
   const fetchSession = async () => {
     try {
       const [sessRes, flowRes] = await Promise.all([
-        fetch('/api/simulator/session'),
-        fetch('/api/flow'),
+        fetch(`/api/simulator/session${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''}`),
+        fetch(`/api/flow${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''}`),
       ]);
       if (sessRes.ok) {
         const data = await sessRes.json();
@@ -53,7 +55,7 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
 
   useEffect(() => {
     fetchSession();
-  }, []);
+  }, [accountId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -71,7 +73,7 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
       const res = await fetch('/api/simulator/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: textToSend }),
+        body: JSON.stringify({ message: textToSend, accountId }),
       });
       if (res.ok) {
         const updated = await res.json();
@@ -87,7 +89,11 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
   const handleResetSession = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/simulator/reset', { method: 'POST' });
+      const res = await fetch('/api/simulator/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId }),
+      });
       if (res.ok) {
         const updated = await res.json();
         setSession(updated);
@@ -111,7 +117,7 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
             </div>
             <div>
               <h3 className="text-sm font-semibold text-slate-800 leading-tight">
-                FluxoZap WhatsApp Bot
+                {accountName ? `Simulador · ${accountName}` : 'FluxoZap WhatsApp Bot'}
               </h3>
               <p className="text-[11px] text-emerald-600 font-medium">
                 {isLoading ? 'digitando...' : 'online'}
@@ -241,8 +247,11 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
           {session?.waitingForInput && (
             <div className="mb-2 px-3 py-1.5 bg-teal-50 border border-teal-200 text-teal-800 rounded-lg text-xs flex items-center justify-between">
               <span className="font-medium">
-                ⏳ O bot está aguardando sua resposta para salvar em{' '}
-                <strong className="font-mono text-teal-900">{`{{${session.waitingVariableName || 'resposta'}}}`}</strong>
+                {session.waitingVariableName ? (
+                  <>⏳ O bot está aguardando sua resposta para salvar em <strong className="font-mono text-teal-900">{`{{${session.waitingVariableName}}}`}</strong></>
+                ) : (
+                  <>⏳ O bot está aguardando uma resposta para continuar o fluxo.</>
+                )}
               </span>
             </div>
           )}
@@ -254,7 +263,9 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder={
                 session?.waitingForInput
-                  ? `Digite sua resposta para {{${session.waitingVariableName || 'resposta'}}}...`
+                  ? session.waitingVariableName
+                    ? `Digite sua resposta para {{${session.waitingVariableName}}}...`
+                    : 'Digite sua resposta para continuar...'
                   : 'Digite uma mensagem (ex: oi, sim, consultar)...'
               }
               className="flex-1 bg-white border border-slate-300 rounded-full px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 shadow-2xs"

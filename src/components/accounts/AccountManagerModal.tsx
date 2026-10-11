@@ -323,7 +323,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                     type="text"
                     value={formData.phoneNumber}
                     onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                    placeholder="Ex: +55 11 98765-4321"
+                    placeholder="Ex: +55 11 99999-9999"
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                   />
                 </div>

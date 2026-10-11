@@ -39,7 +39,7 @@ export const DocumentNode = ({ data, selected }: { data: any; selected?: boolean
               {data.filename || 'documento.pdf'}
             </p>
             <p className="text-[10px] text-slate-400 truncate">
-              {data.mediaUrl ? 'Arquivo vinculado' : 'URL não configurada'}
+              {data.mediaId ? 'Arquivo pronto na Meta' : data.mediaUrl ? 'URL externa vinculada' : 'Arquivo não configurado'}
             </p>
           </div>
           <Download className="w-3.5 h-3.5 text-slate-400 shrink-0" />

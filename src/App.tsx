@@ -8,10 +8,13 @@ import {
   Database,
   Terminal,
   Cloud,
+  Unplug,
+  BadgeDollarSign,
 } from 'lucide-react';
 import { FlowEditor } from './components/flow/FlowEditor';
 import { WhatsAppSimulator } from './components/simulator/WhatsAppSimulator';
 import { MetaApiSettings } from './components/settings/MetaApiSettings';
+import { XPagSettings } from './components/settings/XPagSettings';
 import { ConversationsList } from './components/conversations/ConversationsList';
 import { LogsViewer } from './components/logs/LogsViewer';
 import { MongoDbSettings } from './components/database/MongoDbSettings';
@@ -22,7 +25,7 @@ import { AccountManagerModal } from './components/accounts/AccountManagerModal';
 import { WhatsAppAccount } from './types/flow';
 import { DollarSign } from 'lucide-react';
 
-type ActiveTab = 'editor' | 'simulator' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings';
+type ActiveTab = 'editor' | 'simulator' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
@@ -40,6 +43,15 @@ export default function App() {
       if (res.ok) {
         const data: WhatsAppAccount[] = await res.json();
         setAccounts(data);
+        if (data.length === 0) {
+          setActiveAccountId('');
+          return;
+        }
+        if (activeAccountId && !data.some((account) => account.id === activeAccountId)) {
+          const def = data.find((account) => account.isDefault) || data[0];
+          setActiveAccountId(def.id);
+          return;
+        }
         if (data.length > 0 && !activeAccountId) {
           const def = data.find((a) => a.isDefault) || data[0];
           setActiveAccountId(def.id);
@@ -110,6 +122,17 @@ export default function App() {
               onSelectAccount={(id) => setActiveAccountId(id)}
               onOpenManageModal={() => setIsAccountModalOpen(true)}
             />
+          )}
+          {accounts.length === 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer text-xs font-semibold"
+              title="Validar o Phone Number ID na Meta"
+            >
+              <Unplug className="w-3.5 h-3.5" />
+              <span>Nenhum número conectado</span>
+            </button>
           )}
         </div>
 
@@ -216,6 +239,19 @@ export default function App() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('xpag')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === 'xpag'
+                ? 'bg-white text-slate-900 shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <BadgeDollarSign className="w-3.5 h-3.5 text-violet-600" />
+            <span>Pagamentos XPag</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'settings'
@@ -261,17 +297,28 @@ export default function App() {
             accountName={activeAccount?.name}
           />
         )}
-        {activeTab === 'simulator' && <WhatsAppSimulator />}
+        {activeTab === 'simulator' && (
+          <WhatsAppSimulator accountId={activeAccountId} accountName={activeAccount?.name} />
+        )}
         {activeTab === 'conversations' && (
           <ConversationsList accounts={accounts} activeAccountId={activeAccountId} />
         )}
         {activeTab === 'costs' && (
           <ApiSpendTracker accounts={accounts} activeAccountId={activeAccountId} />
         )}
-        {activeTab === 'logs' && <LogsViewer />}
+        {activeTab === 'logs' && (
+          <LogsViewer activeAccountId={activeAccountId} activeAccountName={activeAccount?.name} />
+        )}
         {activeTab === 'mongodb' && <MongoDbSettings />}
         {activeTab === 'r2' && <R2StorageSettings />}
-        {activeTab === 'settings' && <MetaApiSettings onOpenLogs={() => setActiveTab('logs')} />}
+        {activeTab === 'xpag' && <XPagSettings />}
+        {activeTab === 'settings' && (
+          <MetaApiSettings
+            onOpenLogs={() => setActiveTab('logs')}
+            onConnectionUpdated={fetchAccounts}
+            activeAccountId={activeAccountId}
+          />
+        )}
       </main>
 
       {/* WhatsApp Accounts Management Modal */}

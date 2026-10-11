@@ -21,7 +21,7 @@ export const MongoDbSettings: React.FC = () => {
     status: 'disconnected',
     uriConfigured: false,
     maskedUri: '',
-    modelName: 'WhatsApp',
+    modelName: 'FluxoZap',
   });
   const [inputUri, setInputUri] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -149,11 +149,11 @@ export const MongoDbSettings: React.FC = () => {
                     MongoDB Atlas (Cloud Database)
                   </h2>
                   <span className="text-[11px] font-mono font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md">
-                    Model: WhatsApp
+                    Banco: FluxoZap
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Persistência em nuvem de todos os fluxos, sessões/leads de clientes, credenciais e logs da API no cluster do MongoDB Atlas.
+                  Persistência em coleções separadas para fluxos, sessões, linhas, configurações, logs e pagamentos.
                 </p>
               </div>
             </div>
@@ -218,14 +218,14 @@ export const MongoDbSettings: React.FC = () => {
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
               <span className="text-[10px] text-slate-400 block mb-0.5">Banco de Dados</span>
               <span className="font-semibold text-slate-800 font-mono truncate block">
-                {status.databaseName || (isConnected ? 'fluxozap' : 'Nenhum')}
+                {status.databaseName || (isConnected ? 'FluxoZap' : 'Nenhum')}
               </span>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <span className="text-[10px] text-slate-400 block mb-0.5">Model Específico</span>
+              <span className="text-[10px] text-slate-400 block mb-0.5">Projeto / Models</span>
               <span className="font-bold text-slate-900 font-mono">
-                {status.modelName || 'WhatsApp'}
+                {status.modelName || 'FluxoZap'}
               </span>
             </div>
 
@@ -291,11 +291,11 @@ export const MongoDbSettings: React.FC = () => {
                 type="text"
                 value={inputUri}
                 onChange={(e) => setInputUri(e.target.value)}
-                placeholder="mongodb+srv://<usuario>:<senha>@cluster0.abcde.mongodb.net/fluxozap?retryWrites=true&w=majority"
+                placeholder="mongodb+srv://<usuario>:<senha>@cluster0.abcde.mongodb.net/?retryWrites=true&w=majority"
                 className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
               />
               <p className="text-[11px] text-slate-400 mt-1">
-                Substitua <code>&lt;senha&gt;</code> pela senha real do usuário do banco de dados configurado no MongoDB Atlas.
+                O servidor força o banco <code>FluxoZap</code>, mesmo que a URI não contenha um nome de banco. Assim os dados nunca caem no banco padrão <code>test</code>.
               </p>
             </div>
 
@@ -318,7 +318,7 @@ export const MongoDbSettings: React.FC = () => {
                     className="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold rounded-lg text-xs cursor-pointer transition-colors flex items-center gap-2"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                    Sincronizar Dados no Model WhatsApp
+                    Sincronizar Coleções do FluxoZap
                   </button>
 
                   <button
@@ -386,10 +386,10 @@ export const MongoDbSettings: React.FC = () => {
                 <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
                   4
                 </span>
-                Model Mongoose WhatsApp
+                Banco e coleções do projeto
               </span>
               <p className="text-slate-600 text-[11px] leading-relaxed">
-                O FluxoZap salva todos os documentos automaticamente dentro do model <strong className="font-mono text-emerald-800">WhatsApp</strong> (collection: <code>whatsapps</code>), contendo o fluxo, os clientes e as logs!
+                O servidor cria o banco <strong className="font-mono text-emerald-800">FluxoZap</strong> e organiza cada tipo de dado em sua própria collection. Os JSONs locais continuam como contingência; o MongoDB é atualizado em paralelo quando conectado.
               </p>
             </div>
           </div>
@@ -400,53 +400,35 @@ export const MongoDbSettings: React.FC = () => {
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-teal-600" />
             <h3 className="text-sm font-bold text-slate-900">
-              Estrutura dos Documentos no Model "WhatsApp"
+              Estrutura do banco "FluxoZap"
             </h3>
           </div>
           <p className="text-slate-600 text-xs">
-            Cada instância no MongoDB Atlas possui a seguinte estrutura sob o model <strong>WhatsApp</strong>:
+            As coleções ficam separadas para facilitar consultas, índices e reconciliação de pagamentos:
           </p>
 
           <pre className="p-4 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px] leading-relaxed overflow-x-auto">
-{`// Mongoose Model: WhatsApp (collection: whatsapps)
-{
-  "_id": ObjectId("..."),
-  "identifier": "default",
-  "name": "Instância Principal WhatsApp",
-  
-  // Credenciais da API da Meta
-  "config": {
-    "phoneNumberId": "...",
-    "accessToken": "...",
-    "verifyToken": "..."
-  },
-  
-  // Fluxo de mensagens React Flow
-  "flow": {
-    "nodes": [ /* nós de texto, imagem, documento, aguardar resposta */ ],
-    "edges": [ /* conexões entre os blocos */ ]
-  },
-  
-  // Clientes e conversas que chegaram pelo WhatsApp
-  "sessions": [
-    {
-      "phoneNumber": "5511999999999",
-      "variables": { "nome": "João", "interesse": "Sim" },
-      "history": [ /* mensagens trocadas */ ]
-    }
-  ],
-  
-  // Logs e diagnósticos da Meta WhatsApp API
-  "logs": [
-    {
-      "endpoint": "POST /v21.0/.../messages",
-      "httpStatus": 200,
-      "requestPayload": { ... },
-      "responseBody": { ... }
-    }
-  ]
-}`}
+{`FluxoZap
+├── project_configs   // Meta, Cloudflare R2 e XPag
+├── flows             // funis e conexões entre blocos
+├── sessions          // uma conversa por telefone
+├── whatsapp_accounts // linhas reais retornadas pela Meta
+├── api_logs          // últimos 200 eventos e diagnósticos
+└── xpag_payments     // cobranças, pagador e chave única do webhook`}
           </pre>
+
+          {status.collections && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {status.collections.map((collection) => (
+                <div key={collection} className="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 font-mono text-[11px] text-slate-700 flex items-center justify-between gap-2">
+                  <span>{collection}</span>
+                  <span className="rounded-full bg-white border border-slate-200 px-1.5 py-0.5 text-slate-500">
+                    {status.collectionCounts?.[collection] ?? 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
