@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { mongoService } from './src/services/mongodb';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,6 +70,14 @@ function addApiLog(entry: Omit<ApiLogEntry, 'id' | 'timestamp'>): ApiLogEntry {
     apiLogs = apiLogs.slice(0, 200);
   }
   saveLogsToFile();
+
+  // Persist directly to MongoDB Atlas inside the 'WhatsApp' model
+  if (mongoService.isConnected()) {
+    mongoService.addLog(fullEntry).catch((err) => {
+      console.error('[MongoDB Atlas] Error persisting log to WhatsApp model:', err);
+    });
+  }
+
   return fullEntry;
 }
 
@@ -299,6 +308,15 @@ if (fs.existsSync(SESSIONS_FILE)) {
   }
 }
 
+function persistSession(session: SessionData) {
+  saveSessionsToFile();
+  if (mongoService.isConnected()) {
+    mongoService.saveSession(session).catch((err) => {
+      console.error('[MongoDB Atlas] Error saving session to WhatsApp model:', err);
+    });
+  }
+}
+
 function getOrCreateSession(phoneNumber: string): SessionData {
   let session = sessions.get(phoneNumber);
   if (!session) {
@@ -312,7 +330,7 @@ function getOrCreateSession(phoneNumber: string): SessionData {
       updatedAt: new Date().toISOString(),
     };
     sessions.set(phoneNumber, session);
-    saveSessionsToFile();
+    persistSession(session);
   }
   return session;
 }
@@ -331,7 +349,6 @@ async function sendMetaWhatsAppMessage(
   messageType: 'text' | 'image' | 'document',
   payload: { text?: string; mediaUrl?: string; caption?: string; filename?: string }
 ): Promise<{ success: boolean; data?: any; error?: string; logEntry?: ApiLogEntry }> {
-  // Sanitize phone number (strip + and spaces)
   const cleanPhone = recipientPhone.replace(/\D/g, '');
   const endpoint = `POST /v21.0/${metaConfig.phoneNumberId || '{phoneNumberId}'}/messages`;
 
@@ -470,7 +487,6 @@ async function sendMetaWhatsAppMessage(
 }
 
 // Engine step runner: executes nodes sequentially until a wait_reply or flow end
-// Returns array of errors if any WhatsApp message fails
 async function runFlowStep(
   session: SessionData,
   isLiveWhatsApp: boolean = false
@@ -510,7 +526,6 @@ async function runFlowStep(
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar mensagem de texto.');
-          // Break execution on error so we don't bombard Meta if token or number is bad
           break;
         }
       }
@@ -563,15 +578,13 @@ async function runFlowStep(
         }
       }
     } else if (currentNode.type === 'wait_reply') {
-      // Pause execution here! Wait for user input.
       session.waitingForInput = true;
       session.waitingVariableName = currentNode.data.variableName || 'user_reply';
       session.updatedAt = new Date().toISOString();
-      saveSessionsToFile();
+      persistSession(session);
       return { executionErrors, lastLog };
     } else if (currentNode.type === 'delay') {
       const seconds = (currentNode.data as any)?.delaySeconds || 2;
-      // In live or simulator, wait brief pause if requested
       if (seconds > 0) {
         await new Promise((resolve) => setTimeout(resolve, Math.min(seconds * 1000, 5000)));
       }
@@ -582,7 +595,6 @@ async function runFlowStep(
     if (outgoingEdge) {
       session.currentNodeId = outgoingEdge.target;
     } else {
-      // End of flow reached
       session.currentNodeId = null;
       session.waitingForInput = false;
       break;
@@ -590,7 +602,7 @@ async function runFlowStep(
   }
 
   session.updatedAt = new Date().toISOString();
-  saveSessionsToFile();
+  persistSession(session);
   return { executionErrors, lastLog };
 }
 
@@ -600,7 +612,6 @@ async function handleIncomingUserMessage(
   userMessageText: string,
   isLiveWhatsApp: boolean = false
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
-  // Add to session history
   session.history.push({
     id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     sender: 'user',
@@ -612,31 +623,26 @@ async function handleIncomingUserMessage(
   const nodes = currentFlow.nodes;
   const edges = currentFlow.edges;
 
-  // Check if session was currently waiting for user input
   if (session.waitingForInput && session.currentNodeId) {
     const currentNode = nodes.find((n: any) => n.id === session.currentNodeId);
     if (currentNode && currentNode.type === 'wait_reply') {
-      // Store into variable
       const varName = session.waitingVariableName || currentNode.data.variableName || 'user_reply';
       session.variables[varName] = userMessageText;
       session.waitingForInput = false;
       session.waitingVariableName = undefined;
 
-      // Find next node from this wait_reply
       const outgoingEdge = edges.find((e: any) => e.source === currentNode.id);
       if (outgoingEdge) {
         session.currentNodeId = outgoingEdge.target;
-        // Continue execution of flow
         return await runFlowStep(session, isLiveWhatsApp);
       } else {
         session.currentNodeId = null;
-        saveSessionsToFile();
+        persistSession(session);
         return { executionErrors: [] };
       }
     }
   }
 
-  // If not waiting or no active node, start flow from beginning
   session.currentNodeId = null;
   session.waitingForInput = false;
   return await runFlowStep(session, isLiveWhatsApp);
@@ -649,6 +655,88 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
+  // Auto-connect to MongoDB Atlas if URI is present
+  await mongoService.autoConnect({
+    config: metaConfig,
+    flow: currentFlow,
+    sessions: Array.from(sessions.values()),
+    logs: apiLogs,
+  });
+
+  // If MongoDB has existing WhatsApp document, sync it into memory
+  if (mongoService.isConnected()) {
+    try {
+      const doc = await mongoService.getWhatsAppDocument();
+      if (doc) {
+        if (doc.flow?.nodes?.length > 0) {
+          currentFlow = doc.flow as any;
+        }
+        if (doc.config?.phoneNumberId) {
+          metaConfig = { ...metaConfig, ...doc.config };
+        }
+        if (doc.sessions?.length > 0) {
+          for (const s of doc.sessions) {
+            sessions.set(s.phoneNumber, s as any);
+          }
+        }
+        if (doc.logs?.length > 0) {
+          apiLogs = doc.logs as any;
+        }
+      }
+    } catch (err) {
+      console.error('[MongoDB Atlas] Error syncing initial data from WhatsApp model:', err);
+    }
+  }
+
+  // API: MongoDB Atlas Management
+  app.get('/api/mongodb/status', async (_req: Request, res: Response) => {
+    const status = await mongoService.getStatus();
+    res.json(status);
+  });
+
+  app.post('/api/mongodb/connect', async (req: Request, res: Response) => {
+    const { uri } = req.body;
+    const result = await mongoService.connect(uri);
+    if (result.success) {
+      // Synchronize existing local data into WhatsApp model on Atlas
+      await mongoService.ensureDefaultWhatsAppDocument({
+        config: metaConfig,
+        flow: currentFlow,
+        sessions: Array.from(sessions.values()),
+        logs: apiLogs,
+      });
+    }
+    res.json(result);
+  });
+
+  app.post('/api/mongodb/disconnect', async (_req: Request, res: Response) => {
+    const result = await mongoService.disconnect();
+    res.json(result);
+  });
+
+  app.post('/api/mongodb/sync', async (_req: Request, res: Response) => {
+    if (!mongoService.isConnected()) {
+      return res.status(400).json({
+        success: false,
+        message: 'MongoDB Atlas não está conectado. Conecte primeiro para sincronizar.',
+      });
+    }
+    try {
+      await mongoService.saveFlow(currentFlow);
+      await mongoService.saveMetaConfig(metaConfig);
+      for (const s of sessions.values()) {
+        await mongoService.saveSession(s);
+      }
+      res.json({
+        success: true,
+        message: 'Dados sincronizados com sucesso no model "WhatsApp" do MongoDB Atlas!',
+        status: await mongoService.getStatus(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // API: Get & Save Meta Cloud API Config
   app.get('/api/config', (_req: Request, res: Response) => {
     res.json({
@@ -660,7 +748,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/config', (req: Request, res: Response) => {
+  app.post('/api/config', async (req: Request, res: Response) => {
     const { phoneNumberId, accessToken, wabaId, verifyToken, testPhoneNumber } = req.body;
     metaConfig = {
       phoneNumberId: phoneNumberId?.trim() || metaConfig.phoneNumberId,
@@ -671,6 +759,12 @@ async function startServer() {
     };
     try {
       fs.writeFileSync(CONFIG_FILE, JSON.stringify(metaConfig, null, 2));
+
+      // Persist to MongoDB WhatsApp model
+      if (mongoService.isConnected()) {
+        await mongoService.saveMetaConfig(metaConfig);
+      }
+
       res.json({ success: true, message: 'Configurações salvas com sucesso!' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -695,9 +789,12 @@ async function startServer() {
     });
   });
 
-  app.delete('/api/logs', (_req: Request, res: Response) => {
+  app.delete('/api/logs', async (_req: Request, res: Response) => {
     apiLogs = [];
     saveLogsToFile();
+    if (mongoService.isConnected()) {
+      await mongoService.clearLogs();
+    }
     res.json({ success: true, message: 'Logs limpos com sucesso.' });
   });
 
@@ -808,13 +905,19 @@ async function startServer() {
     res.json(currentFlow);
   });
 
-  app.post('/api/flow', (req: Request, res: Response) => {
+  app.post('/api/flow', async (req: Request, res: Response) => {
     try {
       currentFlow = {
         ...req.body,
         updatedAt: new Date().toISOString(),
       };
       fs.writeFileSync(FLOW_FILE, JSON.stringify(currentFlow, null, 2));
+
+      // Persist to MongoDB WhatsApp model
+      if (mongoService.isConnected()) {
+        await mongoService.saveFlow(currentFlow);
+      }
+
       res.json({ success: true, message: 'Fluxo salvo com sucesso!' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -961,9 +1064,8 @@ async function startServer() {
       updatedAt: new Date().toISOString(),
     };
     sessions.set('simulator_user', session);
-    // Start fresh flow automatically
     await runFlowStep(session, false);
-    saveSessionsToFile();
+    persistSession(session);
     res.json(session);
   });
 

@@ -94,3 +94,16 @@ export interface ApiLogEntry {
   metaFbTraceId?: string;
   diagnosticTip?: string;
 }
+
+export interface MongoStatus {
+  status: 'connected' | 'connecting' | 'disconnected' | 'error';
+  uriConfigured: boolean;
+  maskedUri: string;
+  databaseName?: string;
+  host?: string;
+  pingMs?: number;
+  documentsCount?: number;
+  modelName: string;
+  error?: string;
+  lastConnectedAt?: string;
+}
