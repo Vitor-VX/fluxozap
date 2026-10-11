@@ -23,6 +23,7 @@ const CONFIG_FILE = path.join(DATA_DIR, 'meta_config.json');
 const FLOW_FILE = path.join(DATA_DIR, 'flow.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const LOGS_FILE = path.join(DATA_DIR, 'api_logs.json');
+const ACCOUNTS_FILE = path.join(DATA_DIR, 'whatsapp_accounts.json');
 
 // Interface for API Logs
 interface ApiLogEntry {
@@ -274,10 +275,69 @@ if (fs.existsSync(FLOW_FILE)) {
   }
 }
 
+interface WhatsAppAccount {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  phoneNumberId: string;
+  wabaId?: string;
+  accessToken?: string;
+  verifyToken?: string;
+  isDefault?: boolean;
+  color?: string;
+  flow?: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
+let whatsappAccounts: WhatsAppAccount[] = [];
+
+if (fs.existsSync(ACCOUNTS_FILE)) {
+  try {
+    whatsappAccounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8'));
+  } catch (err) {
+    console.error('Error reading accounts file:', err);
+  }
+}
+
+if (!whatsappAccounts || whatsappAccounts.length === 0) {
+  whatsappAccounts = [
+    {
+      id: 'acc_default',
+      name: 'Linha Principal Comercial',
+      phoneNumber: metaConfig.testPhoneNumber || '+55 11 98765-4321',
+      phoneNumberId: metaConfig.phoneNumberId || '10394857281920',
+      wabaId: metaConfig.wabaId || '',
+      accessToken: metaConfig.accessToken || '',
+      verifyToken: metaConfig.verifyToken || 'fluxozap_webhook_secret_2026',
+      isDefault: true,
+      color: 'emerald',
+      flow: currentFlow,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ];
+  try {
+    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(whatsappAccounts, null, 2));
+  } catch (err) {
+    console.error('Error saving initial accounts:', err);
+  }
+}
+
+function saveAccountsToFile() {
+  try {
+    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(whatsappAccounts, null, 2));
+  } catch (err) {
+    console.error('Error saving accounts file:', err);
+  }
+}
+
 // User sessions by phone number
 interface SessionData {
   phoneNumber: string;
   name?: string;
+  accountId?: string;
+  accountPhoneNumberId?: string;
   activeFlowId: string;
   currentNodeId: string | null;
   waitingForInput: boolean;
@@ -362,16 +422,19 @@ function updateWindowState(session: SessionData): SessionData {
   return session;
 }
 
-function getOrCreateSession(phoneNumber: string): SessionData {
+function getOrCreateSession(phoneNumber: string, accountId?: string): SessionData {
   let session = sessions.get(phoneNumber);
   const now = new Date();
   if (!session) {
+    const acc = whatsappAccounts.find((a) => a.id === accountId) || whatsappAccounts.find((a) => a.isDefault) || whatsappAccounts[0];
     const windowExpires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const autoDelete = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     session = {
       phoneNumber,
-      activeFlowId: currentFlow.id,
+      accountId: acc?.id || 'acc_default',
+      accountPhoneNumberId: acc?.phoneNumberId || metaConfig.phoneNumberId,
+      activeFlowId: acc?.flow?.id || currentFlow.id,
       currentNodeId: null,
       waitingForInput: false,
       variables: { phone: phoneNumber },
@@ -390,6 +453,9 @@ function getOrCreateSession(phoneNumber: string): SessionData {
     sessions.set(phoneNumber, session);
     persistSession(session);
   } else {
+    if (accountId && !session.accountId) {
+      session.accountId = accountId;
+    }
     updateWindowState(session);
   }
   return session;
@@ -432,12 +498,15 @@ function replaceVariables(text: string, variables: Record<string, string>): stri
 async function sendMetaWhatsAppMessage(
   recipientPhone: string,
   messageType: 'text' | 'image' | 'document' | 'audio' | 'video',
-  payload: { text?: string; mediaUrl?: string; caption?: string; filename?: string }
+  payload: { text?: string; mediaUrl?: string; caption?: string; filename?: string },
+  accountOverride?: { phoneNumberId?: string; accessToken?: string }
 ): Promise<{ success: boolean; data?: any; error?: string; logEntry?: ApiLogEntry }> {
   const cleanPhone = recipientPhone.replace(/\D/g, '');
-  const endpoint = `POST /v21.0/${metaConfig.phoneNumberId || '{phoneNumberId}'}/messages`;
+  const activePhoneNumberId = accountOverride?.phoneNumberId || metaConfig.phoneNumberId;
+  const activeAccessToken = accountOverride?.accessToken || metaConfig.accessToken;
+  const endpoint = `POST /v21.0/${activePhoneNumberId || '{phoneNumberId}'}/messages`;
 
-  if (!metaConfig.phoneNumberId || !metaConfig.accessToken) {
+  if (!activePhoneNumberId || !activeAccessToken) {
     const log = addApiLog({
       type: 'error',
       direction: 'outbound',
@@ -447,7 +516,7 @@ async function sendMetaWhatsAppMessage(
       success: false,
       metaErrorMessage: 'Credenciais ausentes: Phone Number ID ou Access Token não configurados.',
       diagnosticTip:
-        'Acesse a aba "Configuração Meta API" e preencha o Phone Number ID e o Access Token gerados no portal da Meta Developers.',
+        'Acesse a aba "Configuração Meta API" ou "Gerenciar Números" e preencha o Phone Number ID e o Access Token.',
     });
 
     return {
@@ -496,13 +565,13 @@ async function sendMetaWhatsAppMessage(
   }
 
   try {
-    const url = `https://graph.facebook.com/v21.0/${metaConfig.phoneNumberId}/messages`;
+    const url = `https://graph.facebook.com/v21.0/${activePhoneNumberId}/messages`;
     console.log(`[WhatsApp API Request] Envio para ${cleanPhone} (${messageType})...`);
 
     const res = await fetch(url, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${metaConfig.accessToken}`,
+        Authorization: `Bearer ${activeAccessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -592,8 +661,17 @@ async function runFlowStep(
     return { executionErrors: [] };
   }
 
-  const nodes = currentFlow.nodes;
-  const edges = currentFlow.edges;
+  const sessionAccount =
+    whatsappAccounts.find((a) => a.id === session.accountId) ||
+    whatsappAccounts.find((a) => a.isDefault) ||
+    whatsappAccounts[0];
+  const activeFlow = sessionAccount?.flow || currentFlow;
+  const nodes = activeFlow.nodes || [];
+  const edges = activeFlow.edges || [];
+  const accountCreds = sessionAccount
+    ? { phoneNumberId: sessionAccount.phoneNumberId, accessToken: sessionAccount.accessToken }
+    : undefined;
+
   const executionErrors: string[] = [];
   let lastLog: ApiLogEntry | undefined;
 
@@ -623,7 +701,12 @@ async function runFlowStep(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp) {
-        const sendResult = await sendMetaWhatsAppMessage(session.phoneNumber, 'text', { text: parsedText });
+        const sendResult = await sendMetaWhatsAppMessage(
+          session.phoneNumber,
+          'text',
+          { text: parsedText },
+          accountCreds
+        );
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar mensagem de texto.');
@@ -643,13 +726,69 @@ async function runFlowStep(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp && currentNode.data.mediaUrl) {
-        const sendResult = await sendMetaWhatsAppMessage(session.phoneNumber, 'image', {
-          mediaUrl: currentNode.data.mediaUrl,
-          caption: parsedCaption,
-        });
+        const sendResult = await sendMetaWhatsAppMessage(
+          session.phoneNumber,
+          'image',
+          {
+            mediaUrl: currentNode.data.mediaUrl,
+            caption: parsedCaption,
+          },
+          accountCreds
+        );
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar imagem.');
+          break;
+        }
+      }
+    } else if (currentNode.type === 'send_audio') {
+      const msgItem = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        sender: 'bot' as const,
+        type: 'audio' as const,
+        content: '[Mensagem de Voz / Áudio]',
+        mediaUrl: currentNode.data.mediaUrl,
+        filename: currentNode.data.filename || 'audio.mp3',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      session.history.push(msgItem);
+
+      if (isLiveWhatsApp && currentNode.data.mediaUrl) {
+        const sendResult = await sendMetaWhatsAppMessage(
+          session.phoneNumber,
+          'audio',
+          { mediaUrl: currentNode.data.mediaUrl },
+          accountCreds
+        );
+        if (sendResult.logEntry) lastLog = sendResult.logEntry;
+        if (!sendResult.success) {
+          executionErrors.push(sendResult.error || 'Erro ao enviar áudio.');
+          break;
+        }
+      }
+    } else if (currentNode.type === 'send_video') {
+      const parsedCaption = replaceVariables(currentNode.data.caption || '', session.variables);
+      const msgItem = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        sender: 'bot' as const,
+        type: 'video' as const,
+        content: parsedCaption || '[Vídeo Enviado]',
+        mediaUrl: currentNode.data.mediaUrl,
+        caption: parsedCaption,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      session.history.push(msgItem);
+
+      if (isLiveWhatsApp && currentNode.data.mediaUrl) {
+        const sendResult = await sendMetaWhatsAppMessage(
+          session.phoneNumber,
+          'video',
+          { mediaUrl: currentNode.data.mediaUrl, caption: parsedCaption },
+          accountCreds
+        );
+        if (sendResult.logEntry) lastLog = sendResult.logEntry;
+        if (!sendResult.success) {
+          executionErrors.push(sendResult.error || 'Erro ao enviar vídeo.');
           break;
         }
       }
@@ -667,11 +806,16 @@ async function runFlowStep(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp && currentNode.data.mediaUrl) {
-        const sendResult = await sendMetaWhatsAppMessage(session.phoneNumber, 'document', {
-          mediaUrl: currentNode.data.mediaUrl,
-          caption: parsedCaption,
-          filename: currentNode.data.filename,
-        });
+        const sendResult = await sendMetaWhatsAppMessage(
+          session.phoneNumber,
+          'document',
+          {
+            mediaUrl: currentNode.data.mediaUrl,
+            caption: parsedCaption,
+            filename: currentNode.data.filename,
+          },
+          accountCreds
+        );
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar documento.');
@@ -1136,17 +1280,130 @@ async function startServer() {
     }
   });
 
-  // API: Get & Save Flow
-  app.get('/api/flow', (_req: Request, res: Response) => {
+  // API: Multiple WhatsApp Accounts / Phone Numbers Management
+  app.get('/api/accounts', (_req: Request, res: Response) => {
+    res.json(whatsappAccounts);
+  });
+
+  app.post('/api/accounts', (req: Request, res: Response) => {
+    try {
+      const { name, phoneNumber, phoneNumberId, wabaId, accessToken, color, isDefault } = req.body;
+      if (!name || !phoneNumberId) {
+        return res.status(400).json({ success: false, error: 'Nome e Phone Number ID são obrigatórios.' });
+      }
+
+      const newId = `acc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      
+      // If setting as default, unmark other defaults
+      if (isDefault) {
+        whatsappAccounts.forEach((a) => (a.isDefault = false));
+      }
+
+      const newAccount: WhatsAppAccount = {
+        id: newId,
+        name: name.trim(),
+        phoneNumber: (phoneNumber || '').trim(),
+        phoneNumberId: phoneNumberId.trim(),
+        wabaId: (wabaId || '').trim(),
+        accessToken: (accessToken || '').trim(),
+        verifyToken: metaConfig.verifyToken,
+        isDefault: Boolean(isDefault) || whatsappAccounts.length === 0,
+        color: color || 'blue',
+        flow: JSON.parse(JSON.stringify(currentFlow)), // Clone current flow as starting point
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      whatsappAccounts.push(newAccount);
+      saveAccountsToFile();
+
+      res.json({
+        success: true,
+        message: `Novo número ${newAccount.name} adicionado com sucesso!`,
+        account: newAccount,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/accounts/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const account = whatsappAccounts.find((a) => a.id === id);
+    if (!account) {
+      return res.status(404).json({ success: false, error: 'Número não encontrado.' });
+    }
+
+    const { name, phoneNumber, phoneNumberId, wabaId, accessToken, color, isDefault } = req.body;
+
+    if (isDefault) {
+      whatsappAccounts.forEach((a) => (a.isDefault = false));
+      account.isDefault = true;
+    }
+
+    if (name !== undefined) account.name = name.trim();
+    if (phoneNumber !== undefined) account.phoneNumber = phoneNumber.trim();
+    if (phoneNumberId !== undefined) account.phoneNumberId = phoneNumberId.trim();
+    if (wabaId !== undefined) account.wabaId = wabaId.trim();
+    if (accessToken !== undefined) account.accessToken = accessToken.trim();
+    if (color !== undefined) account.color = color;
+    account.updatedAt = new Date().toISOString();
+
+    saveAccountsToFile();
+    res.json({ success: true, message: 'Dados do número atualizados com sucesso.', account });
+  });
+
+  app.delete('/api/accounts/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (whatsappAccounts.length <= 1) {
+      return res.status(400).json({ success: false, error: 'Não é possível remover a única conta cadastrada.' });
+    }
+
+    const idx = whatsappAccounts.findIndex((a) => a.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, error: 'Número não encontrado.' });
+    }
+
+    const wasDefault = whatsappAccounts[idx].isDefault;
+    whatsappAccounts.splice(idx, 1);
+    if (wasDefault && whatsappAccounts.length > 0) {
+      whatsappAccounts[0].isDefault = true;
+    }
+
+    saveAccountsToFile();
+    res.json({ success: true, message: 'Número de WhatsApp removido com sucesso.' });
+  });
+
+  // API: Get & Save Flow (Supports account-specific flows via ?accountId=)
+  app.get('/api/flow', (req: Request, res: Response) => {
+    const accountId = req.query.accountId as string;
+    if (accountId) {
+      const account = whatsappAccounts.find((a) => a.id === accountId);
+      if (account && account.flow) {
+        return res.json(account.flow);
+      }
+    }
     res.json(currentFlow);
   });
 
   app.post('/api/flow', async (req: Request, res: Response) => {
     try {
-      currentFlow = {
+      const accountId = (req.query.accountId as string) || req.body.accountId;
+      const updatedFlowData = {
         ...req.body,
         updatedAt: new Date().toISOString(),
       };
+
+      if (accountId) {
+        const account = whatsappAccounts.find((a) => a.id === accountId);
+        if (account) {
+          account.flow = updatedFlowData;
+          account.updatedAt = new Date().toISOString();
+          saveAccountsToFile();
+        }
+      }
+
+      currentFlow = updatedFlowData;
       fs.writeFileSync(FLOW_FILE, JSON.stringify(currentFlow, null, 2));
 
       if (mongoService.isConnected()) {
@@ -1157,6 +1414,146 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
+  });
+
+  // API: Meta WhatsApp API Costs & Spend Analytics
+  app.get('/api/costs', (req: Request, res: Response) => {
+    const exchangeRate = parseFloat(req.query.exchangeRate as string) || 5.65;
+
+    // Official Meta WhatsApp Cloud API rates (USD) for Brazil:
+    // Marketing: $0.0625 | Utility: $0.0350 | Auth: $0.0315 | Service: $0.0300
+    const RATES = {
+      marketing: 0.0625,
+      utility: 0.035,
+      authentication: 0.0315,
+      service: 0.03,
+    };
+
+    const sessionsList = Array.from(sessions.values()).filter((s) => s.phoneNumber !== 'simulator_user');
+    const totalConversations = sessionsList.length;
+
+    let marketingCount = 0;
+    let utilityCount = 0;
+    let authCount = 0;
+    let serviceCount = 0;
+    let ads72hCount = 0;
+    let freeTierUsed = 0;
+
+    const accountStatsMap = new Map<string, { conversations: number; messages: number; costUsd: number }>();
+    whatsappAccounts.forEach((acc) => {
+      accountStatsMap.set(acc.id, { conversations: 0, messages: 0, costUsd: 0 });
+    });
+
+    const recentBilledConversations: any[] = [];
+
+    sessionsList.forEach((s) => {
+      const accId = s.accountId || 'acc_default';
+      const accStat = accountStatsMap.get(accId) || { conversations: 0, messages: 0, costUsd: 0 };
+      accStat.conversations += 1;
+      accStat.messages += s.history?.length || 0;
+
+      const accObj = whatsappAccounts.find((a) => a.id === accId);
+      const accName = accObj?.name || 'Linha Principal';
+
+      const isAd = Boolean(s.referral?.isFromAd) || s.windowType === '72h_ads';
+
+      if (isAd) {
+        ads72hCount += 1;
+        recentBilledConversations.push({
+          id: `conv_${s.phoneNumber}`,
+          phoneNumber: s.phoneNumber,
+          accountName: accName,
+          category: 'free_ads',
+          costUsd: 0,
+          costBrl: 0,
+          windowType: '72h_ads',
+          openedAt: s.lastCustomerMessageAt || s.createdAt,
+          expiresAt: s.windowExpiresAt || '',
+          isAd: true,
+        });
+      } else {
+        if (freeTierUsed < 1000) {
+          freeTierUsed += 1;
+          recentBilledConversations.push({
+            id: `conv_${s.phoneNumber}`,
+            phoneNumber: s.phoneNumber,
+            accountName: accName,
+            category: 'free_tier',
+            costUsd: 0,
+            costBrl: 0,
+            windowType: '24h_standard',
+            openedAt: s.lastCustomerMessageAt || s.createdAt,
+            expiresAt: s.windowExpiresAt || '',
+            isAd: false,
+          });
+        } else {
+          serviceCount += 1;
+          accStat.costUsd += RATES.service;
+          recentBilledConversations.push({
+            id: `conv_${s.phoneNumber}`,
+            phoneNumber: s.phoneNumber,
+            accountName: accName,
+            category: 'service',
+            costUsd: RATES.service,
+            costBrl: RATES.service * exchangeRate,
+            windowType: '24h_standard',
+            openedAt: s.lastCustomerMessageAt || s.createdAt,
+            expiresAt: s.windowExpiresAt || '',
+            isAd: false,
+          });
+        }
+      }
+
+      accountStatsMap.set(accId, accStat);
+    });
+
+    const totalSpendUsd =
+      serviceCount * RATES.service + marketingCount * RATES.marketing + utilityCount * RATES.utility;
+    const totalSpendBrl = totalSpendUsd * exchangeRate;
+
+    const adsFreeSavingsUsd = ads72hCount * RATES.service;
+    const adsFreeSavingsBrl = adsFreeSavingsUsd * exchangeRate;
+
+    const byAccount = whatsappAccounts.map((acc) => {
+      const st = accountStatsMap.get(acc.id) || { conversations: 0, messages: 0, costUsd: 0 };
+      return {
+        accountId: acc.id,
+        accountName: acc.name,
+        phoneNumber: acc.phoneNumber,
+        conversationsCount: st.conversations,
+        messagesCount: st.messages,
+        estimatedCostUsd: st.costUsd,
+        estimatedCostBrl: st.costUsd * exchangeRate,
+      };
+    });
+
+    res.json({
+      totalSpendUsd,
+      totalSpendBrl,
+      exchangeRateBrl: exchangeRate,
+      totalConversations,
+      freeTierLimit: 1000,
+      freeTierUsed,
+      freeTierRemaining: Math.max(0, 1000 - freeTierUsed),
+      adsFreeWindowsCount: ads72hCount,
+      adsFreeSavingsUsd,
+      adsFreeSavingsBrl,
+      breakdown: {
+        marketing: { count: marketingCount, costUsd: 0, costBrl: 0, unitPriceUsd: RATES.marketing },
+        utility: { count: utilityCount, costUsd: 0, costBrl: 0, unitPriceUsd: RATES.utility },
+        authentication: { count: authCount, costUsd: 0, costBrl: 0, unitPriceUsd: RATES.authentication },
+        service: {
+          count: serviceCount,
+          costUsd: serviceCount * RATES.service,
+          costBrl: serviceCount * RATES.service * exchangeRate,
+          unitPriceUsd: RATES.service,
+        },
+        freeTier: { count: freeTierUsed, costUsd: 0, costBrl: 0 },
+        ads72h: { count: ads72hCount, costUsd: 0, costBrl: 0 },
+      },
+      byAccount,
+      recentBilledConversations: recentBilledConversations.slice(0, 50),
+    });
   });
 
   // API: Webhook Verification for Meta (GET)
@@ -1213,7 +1610,18 @@ async function startServer() {
               const contactInfo = value.contacts?.[0];
               const contactName = contactInfo?.profile?.name;
 
-              const session = getOrCreateSession(from);
+              // Identify destination WhatsApp line/account
+              const destPhoneNumberId = value.metadata?.phone_number_id;
+              const matchedAccount =
+                whatsappAccounts.find((a) => a.phoneNumberId === destPhoneNumberId) ||
+                whatsappAccounts.find((a) => a.isDefault) ||
+                whatsappAccounts[0];
+
+              const session = getOrCreateSession(from, matchedAccount?.id);
+              if (matchedAccount) {
+                session.accountId = matchedAccount.id;
+                session.accountPhoneNumberId = matchedAccount.phoneNumberId;
+              }
               if (contactName && !session.name) {
                 session.name = contactName;
               }
@@ -1543,11 +1951,16 @@ async function startServer() {
     res.json({ success: true, message: 'Limpeza de conversas expiradas concluída.' });
   });
 
-  // API: Get all active sessions / contacts (with live window state)
-  app.get('/api/sessions', (_req: Request, res: Response) => {
-    const list = Array.from(sessions.values())
+  // API: Get all active sessions / contacts (with live window state and optional accountId filter)
+  app.get('/api/sessions', (req: Request, res: Response) => {
+    const accountId = req.query.accountId as string;
+    let list = Array.from(sessions.values())
       .filter((s) => s.phoneNumber !== 'simulator_user')
       .map(updateWindowState);
+
+    if (accountId && accountId !== 'all') {
+      list = list.filter((s) => s.accountId === accountId);
+    }
     res.json(list);
   });
 
@@ -1637,7 +2050,18 @@ async function startServer() {
     });
   } else {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: {
+          ignored: [
+            '**/data/**',
+            '**/uploads/**',
+            '**/*.json',
+            '**/data/**/*',
+            '**/uploads/**/*',
+          ],
+        },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

@@ -16,13 +16,43 @@ import { ConversationsList } from './components/conversations/ConversationsList'
 import { LogsViewer } from './components/logs/LogsViewer';
 import { MongoDbSettings } from './components/database/MongoDbSettings';
 import { R2StorageSettings } from './components/storage/R2StorageSettings';
+import { ApiSpendTracker } from './components/analytics/ApiSpendTracker';
+import { AccountHeaderSelector } from './components/accounts/AccountHeaderSelector';
+import { AccountManagerModal } from './components/accounts/AccountManagerModal';
+import { WhatsAppAccount } from './types/flow';
+import { DollarSign } from 'lucide-react';
 
-type ActiveTab = 'editor' | 'simulator' | 'conversations' | 'logs' | 'mongodb' | 'r2' | 'settings';
+type ActiveTab = 'editor' | 'simulator' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
   const [hasErrors, setHasErrors] = useState(false);
   const [isMongoConnected, setIsMongoConnected] = useState(false);
+
+  // WhatsApp accounts state
+  const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
+  const [activeAccountId, setActiveAccountId] = useState<string>('');
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+
+  const fetchAccounts = async () => {
+    try {
+      const res = await fetch('/api/accounts');
+      if (res.ok) {
+        const data: WhatsAppAccount[] = await res.json();
+        setAccounts(data);
+        if (data.length > 0 && !activeAccountId) {
+          const def = data.find((a) => a.isDefault) || data[0];
+          setActiveAccountId(def.id);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching accounts:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAccounts();
+  }, []);
 
   // Poll for error state and MongoDB connection state
   useEffect(() => {
@@ -52,21 +82,35 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0];
+
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-50 text-slate-900 select-none overflow-hidden font-sans">
       {/* Top Bar following Top Bar Contract (3 Zones) */}
-      <header className="h-14 bg-white border-b border-slate-200 px-6 flex items-center justify-between gap-6 shrink-0 z-20">
-        {/* Zone 1: Brand Wordmark */}
-        <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-            <Bot className="w-4 h-4" />
+      <header className="h-14 bg-white border-b border-slate-200 px-5 flex items-center justify-between gap-4 shrink-0 z-20">
+        {/* Zone 1: Brand Wordmark & WhatsApp Account Switcher */}
+        <div className="flex items-center gap-3 whitespace-nowrap shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+              <Bot className="w-4 h-4" />
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-base font-bold tracking-tight text-slate-900">FluxoZap</span>
+              <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 hidden sm:inline">
+                WhatsApp &amp; Ads
+              </span>
+            </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-base font-bold tracking-tight text-slate-900">FluxoZap</span>
-            <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
-              WhatsApp &amp; Ads
-            </span>
-          </div>
+
+          {/* WhatsApp Multi-Number Switcher */}
+          {accounts.length > 0 && (
+            <AccountHeaderSelector
+              accounts={accounts}
+              activeAccountId={activeAccountId}
+              onSelectAccount={(id) => setActiveAccountId(id)}
+              onOpenManageModal={() => setIsAccountModalOpen(true)}
+            />
+          )}
         </div>
 
         {/* Zone 2: Navigation Links (Single-Line Controls) */}
@@ -108,6 +152,19 @@ export default function App() {
           >
             <Users className="w-3.5 h-3.5 text-teal-600" />
             <span>Conversas &amp; Leads</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('costs')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === 'costs'
+                ? 'bg-white text-slate-900 shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Custos da API</span>
           </button>
 
           <button
@@ -197,14 +254,35 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-hidden relative">
-        {activeTab === 'editor' && <FlowEditor onFlowSaved={() => {}} />}
+        {activeTab === 'editor' && (
+          <FlowEditor
+            onFlowSaved={() => {}}
+            accountId={activeAccountId}
+            accountName={activeAccount?.name}
+          />
+        )}
         {activeTab === 'simulator' && <WhatsAppSimulator />}
-        {activeTab === 'conversations' && <ConversationsList />}
+        {activeTab === 'conversations' && (
+          <ConversationsList accounts={accounts} activeAccountId={activeAccountId} />
+        )}
+        {activeTab === 'costs' && (
+          <ApiSpendTracker accounts={accounts} activeAccountId={activeAccountId} />
+        )}
         {activeTab === 'logs' && <LogsViewer />}
         {activeTab === 'mongodb' && <MongoDbSettings />}
         {activeTab === 'r2' && <R2StorageSettings />}
         {activeTab === 'settings' && <MetaApiSettings onOpenLogs={() => setActiveTab('logs')} />}
       </main>
+
+      {/* WhatsApp Accounts Management Modal */}
+      <AccountManagerModal
+        isOpen={isAccountModalOpen}
+        onClose={() => setIsAccountModalOpen(false)}
+        accounts={accounts}
+        activeAccountId={activeAccountId}
+        onSelectAccount={(id) => setActiveAccountId(id)}
+        onRefreshAccounts={fetchAccounts}
+      />
     </div>
   );
 }

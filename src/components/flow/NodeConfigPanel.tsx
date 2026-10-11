@@ -1,5 +1,21 @@
 import React, { useState } from 'react';
-import { Trash2, X, Info, Variable, Link, Play, Plus, Check } from 'lucide-react';
+import {
+  Trash2,
+  X,
+  Info,
+  Variable,
+  Link,
+  Play,
+  Plus,
+  Check,
+  UploadCloud,
+  Loader2,
+  Mic,
+  Video,
+  FileText,
+  Image as ImageIcon,
+  CheckCircle2,
+} from 'lucide-react';
 import { FlowNodeData } from '../../types/flow';
 
 interface NodeConfigPanelProps {
@@ -16,11 +32,59 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   onClose,
 }) => {
   const [newKeywordInput, setNewKeywordInput] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
   if (!selectedNode) return null;
 
   const data = selectedNode.data;
   const isStart = selectedNode.type === 'start';
+
+  // Handle direct file upload to Cloudflare R2 / Server storage
+  const handleUploadToR2 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadSuccess(null);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = reader.result as string;
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            fileData: base64Data,
+            mimeType: file.type,
+          }),
+        });
+
+        const resData = await res.json();
+        if (res.ok && resData.success) {
+          onUpdateData(selectedNode.id, {
+            mediaUrl: resData.url,
+            filename: file.name,
+          });
+          setUploadSuccess(
+            resData.storage === 'r2'
+              ? 'Arquivo enviado com sucesso para o Cloudflare R2!'
+              : 'Arquivo salvo com sucesso no servidor de mídia!'
+          );
+          setTimeout(() => setUploadSuccess(null), 5000);
+        } else {
+          alert(resData.error || 'Erro ao subir arquivo.');
+        }
+        setIsUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setIsUploading(false);
+      alert(err.message || 'Erro ao ler arquivo.');
+    }
+  };
 
   const addVariableToText = (varName: string) => {
     const current = data.text || '';
@@ -232,9 +296,43 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           </div>
         )}
 
+        {/* Upload Success Banner */}
+        {uploadSuccess && (
+          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{uploadSuccess}</span>
+          </div>
+        )}
+
         {/* Image Node Fields */}
         {selectedNode.type === 'send_image' && (
           <div className="space-y-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Upload da Imagem para Cloudflare R2</label>
+              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-purple-300 hover:border-purple-500 rounded-xl bg-purple-50/50 hover:bg-purple-50 cursor-pointer transition-all">
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
+                    <span className="text-xs font-semibold text-purple-700">Subindo para R2...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4 text-purple-600" />
+                    <span className="text-xs font-semibold text-purple-700">
+                      Selecionar Imagem do PC (.jpg, .png)
+                    </span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleUploadToR2}
+                  disabled={isUploading}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
             <div>
               <label className="block font-semibold text-slate-700 mb-1">URL Pública da Imagem</label>
               <div className="relative">
@@ -242,24 +340,139 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   type="text"
                   value={data.mediaUrl || ''}
                   onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
-                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
-                  placeholder="https://exemplo.com/imagem.png"
+                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-xs"
+                  placeholder="https://pub-xxx.r2.dev/foto.jpg"
                 />
-                <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
+                <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                A Meta WhatsApp API requer uma URL HTTPS pública ou Cloudflare R2 acessível.
+                Ou digite uma URL pública externa compatível com a Meta API.
               </p>
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Legenda (Opcional)</label>
+              <label className="block font-semibold text-slate-700 mb-1">Legenda da Foto (Opcional)</label>
               <textarea
                 rows={3}
                 value={data.caption || ''}
                 onChange={(e) => onUpdateData(selectedNode.id, { caption: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-xs"
                 placeholder="Texto que acompanha a foto no WhatsApp..."
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Audio Node Fields (Voz/Áudio) */}
+        {selectedNode.type === 'send_audio' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Upload do Áudio para Cloudflare R2</label>
+              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-teal-300 hover:border-teal-500 rounded-xl bg-teal-50/50 hover:bg-teal-50 cursor-pointer transition-all">
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 text-teal-600 animate-spin" />
+                    <span className="text-xs font-semibold text-teal-700">Subindo áudio para R2...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4 text-teal-600" />
+                    <span className="text-xs font-semibold text-teal-700">
+                      Selecionar Áudio do PC (.mp3, .ogg, .wav, .m4a)
+                    </span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleUploadToR2}
+                  disabled={isUploading}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">URL Pública do Áudio</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={data.mediaUrl || ''}
+                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
+                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-xs"
+                  placeholder="https://pub-xxx.r2.dev/audio.mp3"
+                />
+                <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">
+                A Meta WhatsApp API requer áudios em formato AAC/MP3/OGG acessíveis publicamente.
+              </p>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Nome de Referência do Áudio</label>
+              <input
+                type="text"
+                value={data.filename || ''}
+                onChange={(e) => onUpdateData(selectedNode.id, { filename: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-xs"
+                placeholder="ex: audio_apresentacao.mp3"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Video Node Fields */}
+        {selectedNode.type === 'send_video' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Upload do Vídeo para Cloudflare R2</label>
+              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-rose-300 hover:border-rose-500 rounded-xl bg-rose-50/50 hover:bg-rose-50 cursor-pointer transition-all">
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 text-rose-600 animate-spin" />
+                    <span className="text-xs font-semibold text-rose-700">Subindo vídeo para R2...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4 text-rose-600" />
+                    <span className="text-xs font-semibold text-rose-700">
+                      Selecionar Vídeo do PC (.mp4, .mov)
+                    </span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleUploadToR2}
+                  disabled={isUploading}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">URL Pública do Vídeo</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={data.mediaUrl || ''}
+                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
+                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 text-xs"
+                  placeholder="https://pub-xxx.r2.dev/video.mp4"
+                />
+                <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Legenda do Vídeo (Opcional)</label>
+              <textarea
+                rows={3}
+                value={data.caption || ''}
+                onChange={(e) => onUpdateData(selectedNode.id, { caption: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 text-xs"
+                placeholder="Legenda descritiva do vídeo..."
               />
             </div>
           </div>
@@ -269,14 +482,43 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_document' && (
           <div className="space-y-3">
             <div>
+              <label className="block font-semibold text-slate-700 mb-1">Upload do Documento para Cloudflare R2</label>
+              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-amber-300 hover:border-amber-500 rounded-xl bg-amber-50/50 hover:bg-amber-50 cursor-pointer transition-all">
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />
+                    <span className="text-xs font-semibold text-amber-700">Subindo arquivo para R2...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4 text-amber-600" />
+                    <span className="text-xs font-semibold text-amber-700">
+                      Selecionar Arquivo PDF / Doc do PC
+                    </span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                  onChange={handleUploadToR2}
+                  disabled={isUploading}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            <div>
               <label className="block font-semibold text-slate-700 mb-1">URL do Documento (PDF/Doc)</label>
-              <input
-                type="text"
-                value={data.mediaUrl || ''}
-                onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                placeholder="https://exemplo.com/catalogo.pdf"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={data.mediaUrl || ''}
+                  onChange={(e) => onUpdateData(selectedNode.id, { mediaUrl: e.target.value })}
+                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs"
+                  placeholder="https://pub-xxx.r2.dev/catalogo.pdf"
+                />
+                <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              </div>
             </div>
 
             <div>
@@ -285,7 +527,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 type="text"
                 value={data.filename || ''}
                 onChange={(e) => onUpdateData(selectedNode.id, { filename: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs"
                 placeholder="proposta_comercial.pdf"
               />
             </div>
@@ -296,8 +538,8 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 type="text"
                 value={data.caption || ''}
                 onChange={(e) => onUpdateData(selectedNode.id, { caption: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                placeholder="Baixe o arquivo acima"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs"
+                placeholder="Baixe a apresentação completa no anexo"
               />
             </div>
           </div>

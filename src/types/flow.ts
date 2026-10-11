@@ -3,9 +3,68 @@ export type NodeType =
   | 'send_text'
   | 'send_image'
   | 'send_document'
+  | 'send_audio'
+  | 'send_video'
   | 'wait_reply'
   | 'condition'
   | 'delay';
+
+export interface WhatsAppAccount {
+  id: string; // ex: "acc_principal", "acc_vendas_2"
+  name: string; // ex: "Comercial / Vendas Principal"
+  phoneNumber: string; // ex: "+55 11 98765-4321"
+  phoneNumberId: string; // Meta Phone Number ID
+  wabaId?: string; // WhatsApp Business Account ID
+  accessToken?: string; // Token específico (ou usa o global se vazio)
+  verifyToken?: string;
+  isDefault?: boolean;
+  color?: string; // Cor temática para crachá (emerald, blue, purple, amber, indigo, etc.)
+  flow?: FlowDefinition; // Fluxo exclusivo deste número de WhatsApp
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiCostAnalytics {
+  totalSpendUsd: number;
+  totalSpendBrl: number;
+  exchangeRateBrl: number; // ex: 5.65
+  totalConversations: number;
+  freeTierLimit: number; // 1000 free per month
+  freeTierUsed: number;
+  freeTierRemaining: number;
+  adsFreeWindowsCount: number; // 72h free windows from Meta Ads
+  adsFreeSavingsUsd: number; // money saved by 72h Meta Ads window
+  adsFreeSavingsBrl: number;
+  breakdown: {
+    marketing: { count: number; costUsd: number; costBrl: number; unitPriceUsd: number };
+    utility: { count: number; costUsd: number; costBrl: number; unitPriceUsd: number };
+    authentication: { count: number; costUsd: number; costBrl: number; unitPriceUsd: number };
+    service: { count: number; costUsd: number; costBrl: number; unitPriceUsd: number };
+    freeTier: { count: number; costUsd: number; costBrl: number };
+    ads72h: { count: number; costUsd: number; costBrl: number };
+  };
+  byAccount: Array<{
+    accountId: string;
+    accountName: string;
+    phoneNumber: string;
+    conversationsCount: number;
+    messagesCount: number;
+    estimatedCostUsd: number;
+    estimatedCostBrl: number;
+  }>;
+  recentBilledConversations: Array<{
+    id: string;
+    phoneNumber: string;
+    accountName: string;
+    category: 'marketing' | 'utility' | 'authentication' | 'service' | 'free_ads' | 'free_tier';
+    costUsd: number;
+    costBrl: number;
+    windowType: '24h_standard' | '72h_ads';
+    openedAt: string;
+    expiresAt: string;
+    isAd: boolean;
+  }>;
+}
 
 export interface FlowNodeData {
   label: string;
@@ -88,6 +147,8 @@ export interface ChatMessage {
 export interface UserSession {
   phoneNumber: string;
   name?: string;
+  accountId?: string; // ID da instância/número WhatsApp (ex: acc_vendas)
+  accountPhoneNumberId?: string; // Phone Number ID da Meta
   activeFlowId: string;
   currentNodeId: string | null;
   waitingForInput: boolean;

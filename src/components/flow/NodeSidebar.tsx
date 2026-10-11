@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   MessageSquare,
   Image as ImageIcon,
@@ -8,6 +7,8 @@ import {
   GitBranch,
   Play,
   Plus,
+  Mic,
+  Video,
 } from 'lucide-react';
 import { NodeType } from '../../types/flow';
 
@@ -28,15 +29,31 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
     {
       type: 'send_image' as NodeType,
       title: 'Enviar Imagem',
-      desc: 'Foto ou banner com legenda personalizada',
+      desc: 'Foto ou banner com upload direto para R2',
       icon: ImageIcon,
       color: 'bg-purple-600',
       lightColor: 'bg-purple-50 text-purple-700 border-purple-200',
     },
     {
+      type: 'send_audio' as NodeType,
+      title: 'Enviar Áudio / Voz',
+      desc: 'Mensagem de voz em áudio (.mp3/ogg) gravada ou upload',
+      icon: Mic,
+      color: 'bg-teal-600',
+      lightColor: 'bg-teal-50 text-teal-700 border-teal-200',
+    },
+    {
+      type: 'send_video' as NodeType,
+      title: 'Enviar Vídeo',
+      desc: 'Vídeo institucional ou explicativo (.mp4)',
+      icon: Video,
+      color: 'bg-rose-600',
+      lightColor: 'bg-rose-50 text-rose-700 border-rose-200',
+    },
+    {
       type: 'send_document' as NodeType,
       title: 'Enviar Documento',
-      desc: 'Arquivo PDF, planilha ou catálogo comercial',
+      desc: 'Arquivo PDF, catálogo ou planilha comercial',
       icon: FileText,
       color: 'bg-amber-600',
       lightColor: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -46,8 +63,8 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
       title: 'Aguardar Resposta',
       desc: 'Pausa o bot até o cliente responder e salva na variável',
       icon: MessageCircleQuestion,
-      color: 'bg-teal-600',
-      lightColor: 'bg-teal-50 text-teal-700 border-teal-200',
+      color: 'bg-emerald-600',
+      lightColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     },
     {
       type: 'delay' as NodeType,

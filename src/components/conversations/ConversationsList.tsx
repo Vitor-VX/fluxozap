@@ -28,14 +28,26 @@ import {
   Volume2,
   Video,
 } from 'lucide-react';
-import { UserSession, ChatMessage } from '../../types/flow';
+import { UserSession, ChatMessage, WhatsAppAccount } from '../../types/flow';
 
-export const ConversationsList: React.FC = () => {
+interface ConversationsListProps {
+  accounts?: WhatsAppAccount[];
+  activeAccountId?: string;
+}
+
+export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts = [], activeAccountId }) => {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<UserSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'ads' | 'open_window' | 'paused'>('all');
+  const [accountFilter, setAccountFilter] = useState<string>('all');
+
+  useEffect(() => {
+    if (activeAccountId) {
+      setAccountFilter(activeAccountId);
+    }
+  }, [activeAccountId]);
 
   // Agent chat input state
   const [agentText, setAgentText] = useState('');
@@ -327,6 +339,10 @@ export const ConversationsList: React.FC = () => {
 
   // Filter sessions
   const filteredSessions = sessions.filter((s) => {
+    if (accountFilter !== 'all' && s.accountId && s.accountId !== accountFilter) {
+      return false;
+    }
+
     const matchesSearch =
       s.phoneNumber.includes(searchQuery) ||
       (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -387,6 +403,25 @@ export const ConversationsList: React.FC = () => {
             </div>
           </div>
 
+          {/* Account / Line Filter if multiple accounts exist */}
+          {accounts && accounts.length > 1 && (
+            <div className="flex items-center gap-1.5 p-1 bg-slate-50 border border-slate-200 rounded-lg">
+              <span className="text-[10px] font-bold text-slate-500 pl-1 uppercase">Linha:</span>
+              <select
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value)}
+                className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-slate-800 text-[11px] font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              >
+                <option value="all">Todas as Linhas ({accounts.length})</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.phoneNumber || a.phoneNumberId})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Flow restored banner notification */}
           {flowRestoredNotice && (
             <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-lg text-[11px] flex items-center justify-between">
@@ -424,7 +459,7 @@ export const ConversationsList: React.FC = () => {
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Todos ({sessions.length})
+              Todos ({filteredSessions.length})
             </button>
             <button
               type="button"

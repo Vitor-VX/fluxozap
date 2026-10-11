@@ -16,6 +16,8 @@ import { StartNode } from './StartNode';
 import { TextNode } from './TextNode';
 import { ImageNode } from './ImageNode';
 import { DocumentNode } from './DocumentNode';
+import { AudioNode } from './AudioNode';
+import { VideoNode } from './VideoNode';
 import { WaitReplyNode } from './WaitReplyNode';
 import { DelayNode } from './DelayNode';
 import { ConditionNode } from './ConditionNode';
@@ -26,9 +28,11 @@ import { Save, Check, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react
 
 interface FlowEditorProps {
   onFlowSaved?: () => void;
+  accountId?: string;
+  accountName?: string;
 }
 
-export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
+export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, accountName }) => {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedNode, setSelectedNode] = useState<{
@@ -47,6 +51,8 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
       send_text: TextNode,
       send_image: ImageNode,
       send_document: DocumentNode,
+      send_audio: AudioNode,
+      send_video: VideoNode,
       wait_reply: WaitReplyNode,
       delay: DelayNode,
       condition: ConditionNode,
@@ -58,7 +64,8 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
   const loadFlow = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/flow');
+      const url = accountId ? `/api/flow?accountId=${encodeURIComponent(accountId)}` : '/api/flow';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         const loadedNodes = (data.nodes || []).map((node: Node) => {
@@ -86,7 +93,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
 
   useEffect(() => {
     loadFlow();
-  }, []);
+  }, [accountId]);
 
   const onNodesChange = useCallback(
     (changes: any) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -149,6 +156,22 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
         type,
         mediaUrl: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop',
         caption: 'Confira nossos destaques!',
+      };
+    } else if (type === 'send_audio') {
+      initialData = {
+        label: 'Enviar Áudio / Voz',
+        type,
+        mediaUrl: '',
+        filename: 'mensagem_voz.mp3',
+        durationStr: '0:18',
+      };
+    } else if (type === 'send_video') {
+      initialData = {
+        label: 'Enviar Vídeo',
+        type,
+        mediaUrl: '',
+        filename: 'apresentacao.mp4',
+        caption: 'Assista ao nosso vídeo explicativo!',
       };
     } else if (type === 'send_document') {
       initialData = {
@@ -231,12 +254,13 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
       const triggerType = startNode?.data?.triggerType || 'all';
       const triggerKeywords = startNode?.data?.triggerKeywords || [];
 
-      const res = await fetch('/api/flow', {
+      const saveUrl = accountId ? `/api/flow?accountId=${encodeURIComponent(accountId)}` : '/api/flow';
+      const res = await fetch(saveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: 'flow_main',
-          name: 'Fluxo WhatsApp',
+          id: accountId ? `flow_${accountId}` : 'flow_main',
+          name: accountName ? `Fluxo - ${accountName}` : 'Fluxo WhatsApp',
           description: 'Fluxo de automação oficial',
           triggerType,
           triggerKeywords,
