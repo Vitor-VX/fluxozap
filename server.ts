@@ -4,14 +4,19 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { mongoService } from './src/services/mongodb';
+import { r2StorageService } from './src/services/r2Storage';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Data directory for persistence
 const DATA_DIR = path.resolve(__dirname, 'data');
+const UPLOADS_DIR = path.resolve(__dirname, 'uploads');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 const CONFIG_FILE = path.join(DATA_DIR, 'meta_config.json');
@@ -71,7 +76,6 @@ function addApiLog(entry: Omit<ApiLogEntry, 'id' | 'timestamp'>): ApiLogEntry {
   }
   saveLogsToFile();
 
-  // Persist directly to MongoDB Atlas inside the 'WhatsApp' model
   if (mongoService.isConnected()) {
     mongoService.addLog(fullEntry).catch((err) => {
       console.error('[MongoDB Atlas] Error persisting log to WhatsApp model:', err);
@@ -110,7 +114,7 @@ function analyzeMetaError(status: number, data: any, recipient?: string): {
       `📱 Número Não Autorizado no Modo Teste: Se o seu app na Meta Developers ainda está em "Modo de Desenvolvimento", a Meta BLOQUEIA envio para números que não foram cadastrados previamente. Como resolver: Acesse Meta for Developers > Seu Aplicativo > WhatsApp > Configuração da API > Localize o campo "Para" (To) e adicione o número ${recipient || 'de destino'} para receber o código de verificação por SMS/WhatsApp.`;
   } else if (code === 131047) {
     tip =
-      '⏳ Janela de 24 Horas Fechada (Customer Care Window): A Meta exige que o cliente tenha enviado uma mensagem para o seu número nas últimas 24 horas para você poder enviar mensagens livres de texto/mídia. Se o cliente ainda não falou com o seu número, envie primeiro um "Oi" do celular de teste para o número do robô, ou utilize um Template/Modelo aprovado pela Meta.';
+      '⏳ Janela de Atendimento Fechada (Customer Care Window): O período permitido pela Meta para mensagens livres (24h padrão ou 72h para anúncios do Facebook) expirou. A Meta exige envio de Template pré-aprovado ou que o cliente envie uma nova mensagem para reabrir a janela.';
   } else if (code === 100) {
     tip =
       '⚠️ Parâmetro Inválido: Verifique se o Phone Number ID está correto e se o número de telefone está com DDI e DDD (ex: 5511999999999 sem o sinal de + e sem traços). Se estiver enviando imagem ou PDF, certifique-se de que a URL é HTTPS pública e acessível sem autenticação.';
@@ -156,6 +160,8 @@ const defaultFlow = {
   id: 'flow_welcome',
   name: 'Fluxo de Atendimento e Apresentação',
   description: 'Boas-vindas automáticas, envio de imagem de apresentação, catálogo em PDF e coleta de dados.',
+  triggerType: 'all', // 'all' | 'exact' | 'contains'
+  triggerKeywords: ['Olá, quero saber mais informações', 'oi', 'menu'],
   updatedAt: new Date().toISOString(),
   nodes: [
     {
@@ -165,7 +171,9 @@ const defaultFlow = {
       data: {
         label: 'Gatilho de Início',
         type: 'start',
-        text: 'Qualquer mensagem recebida',
+        triggerType: 'all',
+        triggerKeywords: ['Olá, quero saber mais informações', 'oi', 'menu'],
+        text: 'Qualquer mensagem recebida (ou mensagem específica configurada)',
       },
     },
     {
@@ -257,7 +265,7 @@ const defaultFlow = {
   ],
 };
 
-let currentFlow = defaultFlow;
+let currentFlow: any = defaultFlow;
 if (fs.existsSync(FLOW_FILE)) {
   try {
     currentFlow = JSON.parse(fs.readFileSync(FLOW_FILE, 'utf-8'));
@@ -266,9 +274,10 @@ if (fs.existsSync(FLOW_FILE)) {
   }
 }
 
-// User sessions by phone number (or simulated session 'simulator_user')
+// User sessions by phone number
 interface SessionData {
   phoneNumber: string;
+  name?: string;
   activeFlowId: string;
   currentNodeId: string | null;
   waitingForInput: boolean;
@@ -276,14 +285,39 @@ interface SessionData {
   variables: Record<string, string>;
   history: Array<{
     id: string;
-    sender: 'bot' | 'user' | 'system';
-    type: 'text' | 'image' | 'document' | 'info';
+    sender: 'bot' | 'user' | 'agent' | 'system';
+    type: 'text' | 'image' | 'audio' | 'video' | 'document' | 'info';
     content: string;
     mediaUrl?: string;
+    mediaId?: string;
+    mediaMimeType?: string;
+    mediaSize?: number;
     filename?: string;
+    caption?: string;
     timestamp: string;
+    status?: string;
   }>;
+  lastCustomerMessageAt?: string;
+  windowExpiresAt?: string;
+  windowType?: '24h_standard' | '72h_ads';
+  isWindowOpen?: boolean;
+  referral?: {
+    isFromAd: boolean;
+    sourceType?: string;
+    sourceId?: string;
+    sourceUrl?: string;
+    headline?: string;
+    body?: string;
+    mediaType?: string;
+    imageUrl?: string;
+    receivedAt: string;
+  };
+  botPaused?: boolean;
+  flowCompleted?: boolean;
+  autoDeleteDays?: number;
+  autoDeleteAt?: string;
   updatedAt: string;
+  createdAt: string;
 }
 
 const sessions: Map<string, SessionData> = new Map();
@@ -317,9 +351,24 @@ function persistSession(session: SessionData) {
   }
 }
 
+// Update 24h/72h window status based on current time
+function updateWindowState(session: SessionData): SessionData {
+  if (session.windowExpiresAt) {
+    const expires = new Date(session.windowExpiresAt).getTime();
+    session.isWindowOpen = Date.now() < expires;
+  } else {
+    session.isWindowOpen = false;
+  }
+  return session;
+}
+
 function getOrCreateSession(phoneNumber: string): SessionData {
   let session = sessions.get(phoneNumber);
+  const now = new Date();
   if (!session) {
+    const windowExpires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const autoDelete = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
     session = {
       phoneNumber,
       activeFlowId: currentFlow.id,
@@ -327,13 +376,49 @@ function getOrCreateSession(phoneNumber: string): SessionData {
       waitingForInput: false,
       variables: { phone: phoneNumber },
       history: [],
-      updatedAt: new Date().toISOString(),
+      lastCustomerMessageAt: now.toISOString(),
+      windowExpiresAt: windowExpires.toISOString(),
+      windowType: '24h_standard',
+      isWindowOpen: true,
+      botPaused: false,
+      flowCompleted: false,
+      autoDeleteDays: 7,
+      autoDeleteAt: autoDelete.toISOString(),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
     };
     sessions.set(phoneNumber, session);
     persistSession(session);
+  } else {
+    updateWindowState(session);
   }
   return session;
 }
+
+// Periodic cleanup of expired conversations (7 days rule)
+function cleanupExpiredSessions() {
+  const now = Date.now();
+  let deletedCount = 0;
+  for (const [phone, s] of sessions.entries()) {
+    if (phone === 'simulator_user') continue;
+    const days = s.autoDeleteDays || 7;
+    const lastActive = new Date(s.updatedAt).getTime();
+    if (now - lastActive > days * 24 * 60 * 60 * 1000) {
+      sessions.delete(phone);
+      if (mongoService.isConnected()) {
+        mongoService.deleteSession(phone).catch(console.error);
+      }
+      deletedCount++;
+    }
+  }
+  if (deletedCount > 0) {
+    saveSessionsToFile();
+    console.log(`[Auto-Delete Cleanup] ${deletedCount} conversas expiradas foram removidas.`);
+  }
+}
+
+// Run cleanup check every hour
+setInterval(cleanupExpiredSessions, 60 * 60 * 1000);
 
 // Replace template variables like {{name}} with collected values
 function replaceVariables(text: string, variables: Record<string, string>): string {
@@ -346,7 +431,7 @@ function replaceVariables(text: string, variables: Record<string, string>): stri
 // Send real message using Meta WhatsApp Cloud API with full logging
 async function sendMetaWhatsAppMessage(
   recipientPhone: string,
-  messageType: 'text' | 'image' | 'document',
+  messageType: 'text' | 'image' | 'document' | 'audio' | 'video',
   payload: { text?: string; mediaUrl?: string; caption?: string; filename?: string }
 ): Promise<{ success: boolean; data?: any; error?: string; logEntry?: ApiLogEntry }> {
   const cleanPhone = recipientPhone.replace(/\D/g, '');
@@ -396,6 +481,17 @@ async function sendMetaWhatsAppMessage(
       link: payload.mediaUrl,
       caption: payload.caption || '',
       filename: payload.filename || 'documento.pdf',
+    };
+  } else if (messageType === 'audio') {
+    body.type = 'audio';
+    body.audio = {
+      link: payload.mediaUrl,
+    };
+  } else if (messageType === 'video') {
+    body.type = 'video';
+    body.video = {
+      link: payload.mediaUrl,
+      caption: payload.caption || '',
     };
   }
 
@@ -491,6 +587,11 @@ async function runFlowStep(
   session: SessionData,
   isLiveWhatsApp: boolean = false
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
+  // If bot is paused for this customer, do not execute automated bot steps
+  if (session.botPaused) {
+    return { executionErrors: [] };
+  }
+
   const nodes = currentFlow.nodes;
   const edges = currentFlow.edges;
   const executionErrors: string[] = [];
@@ -597,6 +698,7 @@ async function runFlowStep(
     } else {
       session.currentNodeId = null;
       session.waitingForInput = false;
+      session.flowCompleted = true;
       break;
     }
   }
@@ -606,12 +708,53 @@ async function runFlowStep(
   return { executionErrors, lastLog };
 }
 
+// Checks if an incoming message matches the start trigger rules
+function checkStartTriggerMatch(userMessageText: string): boolean {
+  const startNode = currentFlow.nodes?.find((n: any) => n.type === 'start');
+  const triggerType = startNode?.data?.triggerType || currentFlow.triggerType || 'all';
+  const keywords: string[] = startNode?.data?.triggerKeywords || currentFlow.triggerKeywords || [];
+
+  if (triggerType === 'all') return true;
+  if (!keywords || keywords.length === 0) return true;
+
+  const normalized = userMessageText.trim().toLowerCase();
+
+  if (triggerType === 'exact') {
+    return keywords.some((k) => k.trim().toLowerCase() === normalized);
+  } else if (triggerType === 'contains') {
+    return keywords.some((k) => normalized.includes(k.trim().toLowerCase()));
+  }
+
+  return true;
+}
+
 // User sent a message to the bot
 async function handleIncomingUserMessage(
   session: SessionData,
   userMessageText: string,
   isLiveWhatsApp: boolean = false
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
+  // Update customer window: last message received now
+  const now = new Date();
+  session.lastCustomerMessageAt = now.toISOString();
+
+  // If session is already in a 72h Ads window, maintain it unless it has expired
+  if (session.referral?.isFromAd) {
+    session.windowType = '72h_ads';
+    const expires = session.windowExpiresAt ? new Date(session.windowExpiresAt).getTime() : 0;
+    if (expires < now.getTime()) {
+      // Re-opened as 24h standard after 72h expired
+      session.windowExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      session.windowType = '24h_standard';
+    }
+  } else {
+    // Reset standard 24-hour window from this customer message
+    session.windowType = '24h_standard';
+    session.windowExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  }
+  session.isWindowOpen = true;
+
+  // Add user message to session history
   session.history.push({
     id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     sender: 'user',
@@ -620,9 +763,17 @@ async function handleIncomingUserMessage(
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
 
+  // If human agent paused the bot, only record message without executing flow
+  if (session.botPaused) {
+    session.updatedAt = new Date().toISOString();
+    persistSession(session);
+    return { executionErrors: [] };
+  }
+
   const nodes = currentFlow.nodes;
   const edges = currentFlow.edges;
 
+  // 1. If currently waiting for user input on a wait_reply block
   if (session.waitingForInput && session.currentNodeId) {
     const currentNode = nodes.find((n: any) => n.id === session.currentNodeId);
     if (currentNode && currentNode.type === 'wait_reply') {
@@ -637,14 +788,39 @@ async function handleIncomingUserMessage(
         return await runFlowStep(session, isLiveWhatsApp);
       } else {
         session.currentNodeId = null;
+        session.flowCompleted = true;
         persistSession(session);
         return { executionErrors: [] };
       }
     }
   }
 
+  // 2. If flow is starting or already completed: check start trigger rule
+  const triggerMatches = checkStartTriggerMatch(userMessageText);
+  if (!triggerMatches) {
+    const startNode = currentFlow.nodes?.find((n: any) => n.type === 'start');
+    const triggerType = startNode?.data?.triggerType || currentFlow.triggerType || 'all';
+    const keywords: string[] = startNode?.data?.triggerKeywords || currentFlow.triggerKeywords || [];
+
+    console.log(`[Gatilho de Início] Mensagem "${userMessageText}" não ativou o gatilho "${triggerType}". Bot não disparado.`);
+    session.history.push({
+      id: `sys_${Date.now()}`,
+      sender: 'system',
+      type: 'info',
+      content: `ℹ️ O funil não foi disparado porque o gatilho está configurado para: ${
+        triggerType === 'exact' ? 'mensagem exata' : 'palavras-chave'
+      } (${keywords.map((k) => `"${k}"`).join(', ')}). Envie a mensagem correspondente para ativar o robô.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+    session.updatedAt = new Date().toISOString();
+    persistSession(session);
+    return { executionErrors: [] };
+  }
+
+  // Trigger matched! Reset and execute flow from start
   session.currentNodeId = null;
   session.waitingForInput = false;
+  session.flowCompleted = false;
   return await runFlowStep(session, isLiveWhatsApp);
 }
 
@@ -652,8 +828,11 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+  // Static uploads directory for media files
+  app.use('/uploads', express.static(UPLOADS_DIR));
 
   // Auto-connect to MongoDB Atlas if URI is present
   await mongoService.autoConnect({
@@ -682,11 +861,69 @@ async function startServer() {
         if (doc.logs?.length > 0) {
           apiLogs = doc.logs as any;
         }
+        if (doc.r2Config?.accountId) {
+          r2StorageService.updateConfig(doc.r2Config as any);
+        }
       }
     } catch (err) {
       console.error('[MongoDB Atlas] Error syncing initial data from WhatsApp model:', err);
     }
   }
+
+  // API: Cloudflare R2 Endpoints
+  app.get('/api/r2/config', (_req: Request, res: Response) => {
+    res.json(r2StorageService.getConfig());
+  });
+
+  app.post('/api/r2/config', async (req: Request, res: Response) => {
+    try {
+      r2StorageService.updateConfig(req.body);
+      if (mongoService.isConnected()) {
+        await mongoService.saveR2Config(req.body);
+      }
+      res.json({
+        success: true,
+        message: 'Configurações do Cloudflare R2 salvas com sucesso!',
+        config: r2StorageService.getConfig(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/r2/test', async (_req: Request, res: Response) => {
+    const result = await r2StorageService.testConnection();
+    res.json(result);
+  });
+
+  // Manual File Upload endpoint (for human agent in live chat)
+  app.post('/api/upload', async (req: Request, res: Response) => {
+    try {
+      const { filename, fileData, mimeType } = req.body;
+      if (!fileData) {
+        return res.status(400).json({ success: false, error: 'Arquivo não informado.' });
+      }
+
+      // Convert base64 data to Buffer
+      const base64Content = fileData.includes(';base64,')
+        ? fileData.split(';base64,')[1]
+        : fileData;
+      const buffer = Buffer.from(base64Content, 'base64');
+
+      const uploadResult = await r2StorageService.uploadFile(
+        buffer,
+        filename || 'upload.png',
+        mimeType || 'application/octet-stream'
+      );
+
+      res.json({
+        success: true,
+        ...uploadResult,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
 
   // API: MongoDB Atlas Management
   app.get('/api/mongodb/status', async (_req: Request, res: Response) => {
@@ -698,7 +935,6 @@ async function startServer() {
     const { uri } = req.body;
     const result = await mongoService.connect(uri);
     if (result.success) {
-      // Synchronize existing local data into WhatsApp model on Atlas
       await mongoService.ensureDefaultWhatsAppDocument({
         config: metaConfig,
         flow: currentFlow,
@@ -724,6 +960,7 @@ async function startServer() {
     try {
       await mongoService.saveFlow(currentFlow);
       await mongoService.saveMetaConfig(metaConfig);
+      await mongoService.saveR2Config(r2StorageService.getConfig());
       for (const s of sessions.values()) {
         await mongoService.saveSession(s);
       }
@@ -760,7 +997,6 @@ async function startServer() {
     try {
       fs.writeFileSync(CONFIG_FILE, JSON.stringify(metaConfig, null, 2));
 
-      // Persist to MongoDB WhatsApp model
       if (mongoService.isConnected()) {
         await mongoService.saveMetaConfig(metaConfig);
       }
@@ -913,7 +1149,6 @@ async function startServer() {
       };
       fs.writeFileSync(FLOW_FILE, JSON.stringify(currentFlow, null, 2));
 
-      // Persist to MongoDB WhatsApp model
       if (mongoService.isConnected()) {
         await mongoService.saveFlow(currentFlow);
       }
@@ -954,7 +1189,7 @@ async function startServer() {
     return res.status(403).send('Forbidden verify token mismatch');
   });
 
-  // API: Webhook Event Receiver from Meta (POST)
+  // API: Webhook Event Receiver from Meta (POST) - Supports Audio, Images, Docs, Referral Ads, Window tracking
   app.post('/api/webhook', async (req: Request, res: Response) => {
     res.sendStatus(200); // Acknowledge Meta immediately
 
@@ -975,19 +1210,148 @@ async function startServer() {
             if (value && value.messages && value.messages.length > 0) {
               const msg = value.messages[0];
               const from = msg.from;
+              const contactInfo = value.contacts?.[0];
+              const contactName = contactInfo?.profile?.name;
+
+              const session = getOrCreateSession(from);
+              if (contactName && !session.name) {
+                session.name = contactName;
+              }
+
+              // Check if message came from Click-to-WhatsApp Facebook/Meta Ads (72-hour window!)
+              const referral = msg.referral;
+              if (referral) {
+                const isAd = referral.source_type === 'ad';
+                session.referral = {
+                  isFromAd: isAd,
+                  sourceType: referral.source_type,
+                  sourceId: referral.source_id,
+                  sourceUrl: referral.source_url,
+                  headline: referral.headline,
+                  body: referral.body,
+                  mediaType: referral.media_type,
+                  imageUrl: referral.image_url,
+                  receivedAt: new Date().toISOString(),
+                };
+
+                if (isAd) {
+                  // Meta grants a 72-hour customer care window for Ads!
+                  session.windowType = '72h_ads';
+                  session.windowExpiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+                  console.log(`[Meta Ads Referral] Origem detectada de anúncio Facebook Ads (${referral.source_id}). Janela de 72h ativada para ${from}!`);
+                }
+              }
+
+              // Handle different message types (Text, Image, Audio/Voice, Document, Video)
               let textContent = '';
 
               if (msg.type === 'text') {
                 textContent = msg.text.body;
+                await handleIncomingUserMessage(session, textContent, true);
+              } else if (msg.type === 'image') {
+                textContent = msg.image?.caption || '[Foto Recebida]';
+                // Download and save image in Cloudflare R2 / local
+                const mediaId = msg.image?.id;
+                let mediaUrl = '';
+                if (mediaId && metaConfig.accessToken) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, metaConfig.accessToken, 'foto.jpg');
+                  if (saved) mediaUrl = saved.url;
+                }
+
+                session.history.push({
+                  id: msg.id || `msg_${Date.now()}`,
+                  sender: 'user',
+                  type: 'image',
+                  content: textContent,
+                  mediaUrl: mediaUrl || undefined,
+                  caption: msg.image?.caption,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                });
+
+                if (!session.botPaused) {
+                  await handleIncomingUserMessage(session, textContent, true);
+                } else {
+                  persistSession(session);
+                }
+              } else if (msg.type === 'audio' || msg.type === 'voice') {
+                textContent = '[Áudio de Voz Recebido]';
+                const mediaId = msg.audio?.id || msg.voice?.id;
+                let mediaUrl = '';
+                if (mediaId && metaConfig.accessToken) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, metaConfig.accessToken, 'audio.ogg');
+                  if (saved) mediaUrl = saved.url;
+                }
+
+                session.history.push({
+                  id: msg.id || `msg_${Date.now()}`,
+                  sender: 'user',
+                  type: 'audio',
+                  content: textContent,
+                  mediaUrl: mediaUrl || undefined,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                });
+
+                if (!session.botPaused) {
+                  await handleIncomingUserMessage(session, textContent, true);
+                } else {
+                  persistSession(session);
+                }
+              } else if (msg.type === 'document') {
+                textContent = msg.document?.caption || msg.document?.filename || '[Documento Recebido]';
+                const mediaId = msg.document?.id;
+                let mediaUrl = '';
+                if (mediaId && metaConfig.accessToken) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, metaConfig.accessToken, msg.document?.filename || 'documento.pdf');
+                  if (saved) mediaUrl = saved.url;
+                }
+
+                session.history.push({
+                  id: msg.id || `msg_${Date.now()}`,
+                  sender: 'user',
+                  type: 'document',
+                  content: textContent,
+                  mediaUrl: mediaUrl || undefined,
+                  filename: msg.document?.filename,
+                  caption: msg.document?.caption,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                });
+
+                if (!session.botPaused) {
+                  await handleIncomingUserMessage(session, textContent, true);
+                } else {
+                  persistSession(session);
+                }
+              } else if (msg.type === 'video') {
+                textContent = msg.video?.caption || '[Vídeo Recebido]';
+                const mediaId = msg.video?.id;
+                let mediaUrl = '';
+                if (mediaId && metaConfig.accessToken) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, metaConfig.accessToken, 'video.mp4');
+                  if (saved) mediaUrl = saved.url;
+                }
+
+                session.history.push({
+                  id: msg.id || `msg_${Date.now()}`,
+                  sender: 'user',
+                  type: 'video',
+                  content: textContent,
+                  mediaUrl: mediaUrl || undefined,
+                  caption: msg.video?.caption,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                });
+
+                if (!session.botPaused) {
+                  await handleIncomingUserMessage(session, textContent, true);
+                } else {
+                  persistSession(session);
+                }
               } else if (msg.type === 'interactive') {
                 textContent = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '';
+                await handleIncomingUserMessage(session, textContent, true);
               } else {
-                textContent = `[Mensagem recebida tipo ${msg.type}]`;
+                textContent = `[Mensagem tipo ${msg.type}]`;
+                await handleIncomingUserMessage(session, textContent, true);
               }
-
-              console.log(`Received incoming WhatsApp message from ${from}: ${textContent}`);
-              const session = getOrCreateSession(from);
-              await handleIncomingUserMessage(session, textContent, true);
             }
           }
         }
@@ -1040,6 +1404,153 @@ async function startServer() {
     }
   });
 
+  // API: Live Chat - Human Agent sends direct message to customer
+  app.post('/api/sessions/:phoneNumber/send-agent-message', async (req: Request, res: Response) => {
+    const { phoneNumber } = req.params;
+    const { text, type = 'text', mediaUrl, caption, filename, pauseBot = false } = req.body;
+
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const session = getOrCreateSession(cleanPhone);
+
+    // If requested, pause automated bot so agent can take over conversation
+    if (pauseBot) {
+      session.botPaused = true;
+    }
+
+    try {
+      let sendResult: any = { success: true };
+      if (type === 'text') {
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'text', { text });
+      } else if (type === 'image') {
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'image', { mediaUrl, caption });
+      } else if (type === 'document') {
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'document', { mediaUrl, caption, filename });
+      } else if (type === 'audio') {
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaUrl });
+      } else if (type === 'video') {
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'video', { mediaUrl, caption });
+      }
+
+      // Add to session history as agent message
+      const msgItem = {
+        id: `agent_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        sender: 'agent' as const,
+        type: type as any,
+        content: text || caption || (type === 'image' ? '[Imagem enviada]' : '[Arquivo enviado]'),
+        mediaUrl,
+        filename,
+        caption,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: sendResult.success ? 'delivered' : 'failed',
+      };
+
+      session.history.push(msgItem);
+      session.updatedAt = new Date().toISOString();
+      persistSession(session);
+
+      if (!sendResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: sendResult.error,
+          diagnosticTip: sendResult.logEntry?.diagnosticTip,
+          session,
+        });
+      }
+
+      res.json({ success: true, session });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API: Restart Flow for Contact (Reset funnel state)
+  app.post('/api/sessions/:phoneNumber/restart-flow', async (req: Request, res: Response) => {
+    const { phoneNumber } = req.params;
+    const { triggerNow = false } = req.body;
+
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const session = getOrCreateSession(cleanPhone);
+
+    session.currentNodeId = null;
+    session.waitingForInput = false;
+    session.flowCompleted = false;
+    session.botPaused = false;
+    session.updatedAt = new Date().toISOString();
+
+    if (triggerNow) {
+      await runFlowStep(session, true);
+    }
+
+    persistSession(session);
+    res.json({
+      success: true,
+      message: `Funil restaurado para ${cleanPhone}! ${triggerNow ? 'Fluxo reiniciado agora.' : 'O contato receberá o funil ao enviar a próxima mensagem.'}`,
+      session,
+    });
+  });
+
+  // API: Toggle Bot Pause/Resume for Human Agent
+  app.post('/api/sessions/:phoneNumber/toggle-bot', (req: Request, res: Response) => {
+    const { phoneNumber } = req.params;
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const session = getOrCreateSession(cleanPhone);
+
+    session.botPaused = !session.botPaused;
+    session.updatedAt = new Date().toISOString();
+    persistSession(session);
+
+    res.json({
+      success: true,
+      botPaused: session.botPaused,
+      message: session.botPaused
+        ? 'Robô pausado. Atendente humano no comando.'
+        : 'Robô reativado. Automação responderá normalmente.',
+      session,
+    });
+  });
+
+  // API: Delete lead & conversation
+  app.delete('/api/sessions/:phoneNumber', async (req: Request, res: Response) => {
+    const { phoneNumber } = req.params;
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+
+    sessions.delete(cleanPhone);
+    saveSessionsToFile();
+
+    if (mongoService.isConnected()) {
+      await mongoService.deleteSession(cleanPhone);
+    }
+
+    res.json({ success: true, message: `Conversa e lead de ${cleanPhone} excluídos com sucesso.` });
+  });
+
+  // API: Clear conversation history
+  app.post('/api/sessions/:phoneNumber/clear-history', (req: Request, res: Response) => {
+    const { phoneNumber } = req.params;
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const session = getOrCreateSession(cleanPhone);
+
+    session.history = [];
+    session.updatedAt = new Date().toISOString();
+    persistSession(session);
+
+    res.json({ success: true, message: 'Histórico da conversa limpo.', session });
+  });
+
+  // API: Cleanup expired sessions (> 7 days)
+  app.post('/api/sessions/cleanup-expired', (_req: Request, res: Response) => {
+    cleanupExpiredSessions();
+    res.json({ success: true, message: 'Limpeza de conversas expiradas concluída.' });
+  });
+
+  // API: Get all active sessions / contacts (with live window state)
+  app.get('/api/sessions', (_req: Request, res: Response) => {
+    const list = Array.from(sessions.values())
+      .filter((s) => s.phoneNumber !== 'simulator_user')
+      .map(updateWindowState);
+    res.json(list);
+  });
+
   // API: Simulator Endpoints
   app.get('/api/simulator/session', (_req: Request, res: Response) => {
     const session = getOrCreateSession('simulator_user');
@@ -1054,14 +1565,23 @@ async function startServer() {
   });
 
   app.post('/api/simulator/reset', async (_req: Request, res: Response) => {
+    const now = new Date();
     const session: SessionData = {
       phoneNumber: 'simulator_user',
+      name: 'Simulador WhatsApp',
       activeFlowId: currentFlow.id,
       currentNodeId: null,
       waitingForInput: false,
       variables: { phone: '+55 11 99999-0000', nome: '' },
       history: [],
-      updatedAt: new Date().toISOString(),
+      isWindowOpen: true,
+      windowType: '24h_standard',
+      windowExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+      botPaused: false,
+      flowCompleted: false,
+      autoDeleteDays: 7,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
     };
     sessions.set('simulator_user', session);
     await runFlowStep(session, false);
@@ -1069,10 +1589,44 @@ async function startServer() {
     res.json(session);
   });
 
-  // API: Get all active sessions / contacts
-  app.get('/api/sessions', (_req: Request, res: Response) => {
-    const list = Array.from(sessions.values()).filter((s) => s.phoneNumber !== 'simulator_user');
-    res.json(list);
+  // API: Simulate Meta / Facebook Ads Referral lead for testing (72-hour window)
+  app.post('/api/simulator/simulate-ad-lead', (req: Request, res: Response) => {
+    const { phoneNumber = '+55 11 98765-4321', headline = 'Campanha Facebook Ads - 50% OFF', adId = 'ad_meta_8392104' } = req.body || {};
+    const cleanPhone = (phoneNumber || '5511987654321').replace(/\D/g, '');
+    const session = getOrCreateSession(cleanPhone);
+    const now = new Date();
+
+    session.referral = {
+      isFromAd: true,
+      sourceType: 'ad',
+      sourceId: adId,
+      sourceUrl: 'https://fb.me/ad_fluxozap',
+      headline: headline,
+      body: 'Lead originado pelo clique no anúncio patrocinado do Facebook Ads / Instagram',
+      mediaType: 'image',
+      imageUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&auto=format&fit=crop',
+      receivedAt: now.toISOString(),
+    };
+    session.windowType = '72h_ads';
+    session.windowExpiresAt = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
+    session.isWindowOpen = true;
+    session.name = 'Lead Facebook Ads';
+    session.variables = { ...session.variables, phone: cleanPhone, origem: 'Meta Ads' };
+    session.history.push({
+      id: `ad_${Date.now()}`,
+      sender: 'user',
+      type: 'text',
+      content: 'Olá! Vi o anúncio no Facebook e gostaria de saber mais.',
+      timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+    session.updatedAt = now.toISOString();
+    persistSession(session);
+
+    res.json({
+      success: true,
+      message: `Lead de anúncio Meta Ads simulado com sucesso para ${cleanPhone} com janela de 72h!`,
+      session,
+    });
   });
 
   // Vite middleware in dev or static files in production

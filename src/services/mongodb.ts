@@ -291,6 +291,37 @@ class MongoService {
     }
   }
 
+  // Delete session from WhatsApp model
+  public async deleteSession(phoneNumber: string): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    try {
+      await WhatsApp.updateOne(
+        { identifier: 'default' },
+        { $pull: { sessions: { phoneNumber } } }
+      );
+      return true;
+    } catch (err) {
+      console.error('[MongoDB Atlas] Erro ao deletar sessão no model WhatsApp:', err);
+      return false;
+    }
+  }
+
+  // Save R2 Config in WhatsApp model
+  public async saveR2Config(r2Data: any): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    try {
+      await WhatsApp.updateOne(
+        { identifier: 'default' },
+        { $set: { r2Config: r2Data } },
+        { upsert: true }
+      );
+      return true;
+    } catch (err) {
+      console.error('[MongoDB Atlas] Erro ao salvar R2 config no model WhatsApp:', err);
+      return false;
+    }
+  }
+
   // Add Log Entry into WhatsApp model (maintaining last 200 logs)
   public async addLog(logEntry: any): Promise<boolean> {
     if (!this.isConnected()) return false;

@@ -61,7 +61,20 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
       const res = await fetch('/api/flow');
       if (res.ok) {
         const data = await res.json();
-        setNodes(data.nodes || []);
+        const loadedNodes = (data.nodes || []).map((node: Node) => {
+          if (node.type === 'start') {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                triggerType: node.data?.triggerType || data.triggerType || 'all',
+                triggerKeywords: node.data?.triggerKeywords || data.triggerKeywords || [],
+              },
+            };
+          }
+          return node;
+        });
+        setNodes(loadedNodes);
         setEdges(data.edges || []);
       }
     } catch (err) {
@@ -214,6 +227,10 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
     setSaveSuccess(false);
 
     try {
+      const startNode = nodes.find((n) => n.type === 'start');
+      const triggerType = startNode?.data?.triggerType || 'all';
+      const triggerKeywords = startNode?.data?.triggerKeywords || [];
+
       const res = await fetch('/api/flow', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -221,6 +238,8 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved }) => {
           id: 'flow_main',
           name: 'Fluxo WhatsApp',
           description: 'Fluxo de automação oficial',
+          triggerType,
+          triggerKeywords,
           nodes,
           edges,
         }),

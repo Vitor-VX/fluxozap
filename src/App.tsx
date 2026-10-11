@@ -7,6 +7,7 @@ import {
   Bot,
   Database,
   Terminal,
+  Cloud,
 } from 'lucide-react';
 import { FlowEditor } from './components/flow/FlowEditor';
 import { WhatsAppSimulator } from './components/simulator/WhatsAppSimulator';
@@ -14,8 +15,9 @@ import { MetaApiSettings } from './components/settings/MetaApiSettings';
 import { ConversationsList } from './components/conversations/ConversationsList';
 import { LogsViewer } from './components/logs/LogsViewer';
 import { MongoDbSettings } from './components/database/MongoDbSettings';
+import { R2StorageSettings } from './components/storage/R2StorageSettings';
 
-type ActiveTab = 'editor' | 'simulator' | 'conversations' | 'logs' | 'mongodb' | 'settings';
+type ActiveTab = 'editor' | 'simulator' | 'conversations' | 'logs' | 'mongodb' | 'r2' | 'settings';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
@@ -62,7 +64,7 @@ export default function App() {
           <div className="flex items-baseline gap-2">
             <span className="text-base font-bold tracking-tight text-slate-900">FluxoZap</span>
             <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
-              WhatsApp &amp; Atlas
+              WhatsApp &amp; Ads
             </span>
           </div>
         </div>
@@ -144,6 +146,19 @@ export default function App() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('r2')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === 'r2'
+                ? 'bg-white text-slate-900 shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Cloud className="w-3.5 h-3.5 text-orange-600" />
+            <span>Cloudflare R2</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'settings'
@@ -158,18 +173,14 @@ export default function App() {
 
         {/* Zone 3: Primary Action */}
         <div className="flex items-center gap-2 shrink-0">
-          {activeTab !== 'mongodb' ? (
+          {activeTab !== 'conversations' ? (
             <button
               type="button"
-              onClick={() => setActiveTab('mongodb')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
-                isMongoConnected
-                  ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
-                  : 'text-slate-700 bg-slate-100 hover:bg-slate-200 border-slate-300'
-              }`}
+              onClick={() => setActiveTab('conversations')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-xs transition-colors whitespace-nowrap shrink-0"
             >
-              <Database className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{isMongoConnected ? 'Atlas Conectado' : 'Conectar Atlas'}</span>
+              <Users className="w-3.5 h-3.5" />
+              <span>Ver Conversas &amp; Leads</span>
             </button>
           ) : (
             <button
@@ -191,6 +202,7 @@ export default function App() {
         {activeTab === 'conversations' && <ConversationsList />}
         {activeTab === 'logs' && <LogsViewer />}
         {activeTab === 'mongodb' && <MongoDbSettings />}
+        {activeTab === 'r2' && <R2StorageSettings />}
         {activeTab === 'settings' && <MetaApiSettings onOpenLogs={() => setActiveTab('logs')} />}
       </main>
     </div>

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Trash2, X, Info, Variable, Link } from 'lucide-react';
+import React, { useState } from 'react';
+import { Trash2, X, Info, Variable, Link, Play, Plus, Check } from 'lucide-react';
 import { FlowNodeData } from '../../types/flow';
 
 interface NodeConfigPanelProps {
@@ -15,6 +15,8 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   onDeleteNode,
   onClose,
 }) => {
+  const [newKeywordInput, setNewKeywordInput] = useState('');
+
   if (!selectedNode) return null;
 
   const data = selectedNode.data;
@@ -23,6 +25,25 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   const addVariableToText = (varName: string) => {
     const current = data.text || '';
     onUpdateData(selectedNode.id, { text: current + ` {{${varName}}}` });
+  };
+
+  const handleAddKeyword = (kw?: string) => {
+    const val = kw || newKeywordInput.trim();
+    if (!val) return;
+    const currentKeywords = data.triggerKeywords || [];
+    if (!currentKeywords.includes(val)) {
+      onUpdateData(selectedNode.id, {
+        triggerKeywords: [...currentKeywords, val],
+      });
+    }
+    setNewKeywordInput('');
+  };
+
+  const handleRemoveKeyword = (kwToRemove: string) => {
+    const currentKeywords = data.triggerKeywords || [];
+    onUpdateData(selectedNode.id, {
+      triggerKeywords: currentKeywords.filter((k) => k !== kwToRemove),
+    });
   };
 
   return (
@@ -59,6 +80,119 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             placeholder="Ex: Mensagem de Boas-Vindas"
           />
         </div>
+
+        {/* Start Trigger Node Fields */}
+        {selectedNode.type === 'start' && (
+          <div className="space-y-3.5">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Condição para Disparar o Funil
+              </label>
+              <select
+                value={data.triggerType || 'all'}
+                onChange={(e) =>
+                  onUpdateData(selectedNode.id, {
+                    triggerType: e.target.value as any,
+                  })
+                }
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 bg-white"
+              >
+                <option value="all">Qualquer mensagem que a pessoa enviar</option>
+                <option value="exact">Mensagem exata (ex: "Olá, quero saber mais informações")</option>
+                <option value="contains">Contém palavras-chave (ex: "comprar", "preço")</option>
+              </select>
+            </div>
+
+            {data.triggerType !== 'all' && (
+              <div className="space-y-2.5 p-3 rounded-xl bg-emerald-50/60 border border-emerald-200/80">
+                <span className="font-semibold text-emerald-900 block text-[11px]">
+                  {data.triggerType === 'exact'
+                    ? 'Mensagens Exatas que Ativam o Funil:'
+                    : 'Palavras-chave que Ativam o Funil:'}
+                </span>
+
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newKeywordInput}
+                    onChange={(e) => setNewKeywordInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddKeyword();
+                      }
+                    }}
+                    placeholder={
+                      data.triggerType === 'exact'
+                        ? 'Ex: Olá, quero saber mais informações'
+                        : 'Ex: comprar, suporte'
+                    }
+                    className="flex-1 px-2.5 py-1.5 border border-emerald-300 rounded-lg bg-white text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddKeyword()}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold cursor-pointer transition-colors shrink-0"
+                  >
+                    Adicionar
+                  </button>
+                </div>
+
+                {/* Keywords list */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {(data.triggerKeywords || []).map((kw) => (
+                    <span
+                      key={kw}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-emerald-300 text-emerald-950 font-mono text-[11px] shadow-2xs"
+                    >
+                      <span>"{kw}"</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveKeyword(kw)}
+                        className="text-slate-400 hover:text-rose-600 cursor-pointer ml-0.5"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {(!data.triggerKeywords || data.triggerKeywords.length === 0) && (
+                    <p className="text-[10px] text-rose-600 italic">
+                      Adicione ao menos uma frase ou palavra-chave para ativar.
+                    </p>
+                  )}
+                </div>
+
+                {/* Quick suggestions */}
+                <div className="pt-2 border-t border-emerald-200/60">
+                  <span className="text-[10px] text-emerald-800 font-semibold block mb-1">
+                    Sugestões rápidas:
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      'Olá, quero saber mais informações',
+                      'Quero falar com um atendente',
+                      'Menu',
+                      'Comprar',
+                    ].map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => handleAddKeyword(sug)}
+                        className="text-[10px] bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded px-1.5 py-0.5 cursor-pointer transition-colors"
+                      >
+                        + {sug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-emerald-800 leading-relaxed pt-1">
+                  ⚠️ Se o cliente enviar uma mensagem que não corresponder a estas palavras, a conversa será registrada para atendimento humano, mas o robô não responderá.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Text Node Fields */}
         {selectedNode.type === 'send_text' && (
@@ -114,7 +248,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                A Meta WhatsApp API requer uma URL HTTPS pública e acessível.
+                A Meta WhatsApp API requer uma URL HTTPS pública ou Cloudflare R2 acessível.
               </p>
             </div>
 
@@ -175,7 +309,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             <div className="p-2.5 bg-teal-50 rounded-lg border border-teal-100 flex gap-2">
               <Info className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
               <p className="text-[11px] text-teal-800 leading-relaxed">
-                Este bloco é o coração da conversa interativa! Ele interrompe o envio e espera o usuário enviar uma mensagem no WhatsApp.
+                Este bloco interrompe o envio e espera o usuário enviar uma mensagem no WhatsApp.
               </p>
             </div>
 
@@ -197,9 +331,6 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                   placeholder="ex: nome, email, interesse"
                 />
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">
-                Use este identificador em blocos seguintes: <code>{'{{'}{data.variableName || 'variavel'}{'}}'}</code>
-              </p>
             </div>
 
             <div>
@@ -234,9 +365,6 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 }
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500"
               />
-              <p className="text-[10px] text-slate-400 mt-1">
-                Simula o tempo em que o robô fica digitando antes da próxima mensagem.
-              </p>
             </div>
           </div>
         )}

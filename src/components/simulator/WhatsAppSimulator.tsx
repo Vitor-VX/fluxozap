@@ -23,15 +23,31 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [flowTrigger, setFlowTrigger] = useState<{ triggerType: string; triggerKeywords: string[] }>({
+    triggerType: 'all',
+    triggerKeywords: [],
+  });
+
   const fetchSession = async () => {
     try {
-      const res = await fetch('/api/simulator/session');
-      if (res.ok) {
-        const data = await res.json();
+      const [sessRes, flowRes] = await Promise.all([
+        fetch('/api/simulator/session'),
+        fetch('/api/flow'),
+      ]);
+      if (sessRes.ok) {
+        const data = await sessRes.json();
         setSession(data);
       }
+      if (flowRes.ok) {
+        const flowData = await flowRes.json();
+        const startNode = flowData.nodes?.find((n: any) => n.type === 'start');
+        setFlowTrigger({
+          triggerType: startNode?.data?.triggerType || flowData.triggerType || 'all',
+          triggerKeywords: startNode?.data?.triggerKeywords || flowData.triggerKeywords || [],
+        });
+      }
     } catch (err) {
-      console.error('Error fetching simulator session:', err);
+      console.error('Error fetching simulator data:', err);
     }
   };
 
@@ -140,6 +156,17 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
 
           {session?.history?.map((msg) => {
             const isBot = msg.sender === 'bot';
+            const isSystem = msg.sender === 'system' || msg.type === 'info';
+
+            if (isSystem) {
+              return (
+                <div key={msg.id} className="flex justify-center my-1.5">
+                  <div className="bg-amber-50 text-amber-900 border border-amber-200/80 rounded-xl px-3 py-1.5 text-[11px] max-w-[85%] text-center shadow-2xs">
+                    {msg.content}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -243,7 +270,22 @@ export const WhatsAppSimulator: React.FC<WhatsAppSimulatorProps> = () => {
 
           {/* Quick responses suggestions */}
           <div className="flex items-center gap-1.5 mt-2 overflow-x-auto text-[11px] text-slate-600">
-            <span className="text-[10px] text-slate-400 font-medium shrink-0">Testes rápidos:</span>
+            {flowTrigger.triggerKeywords.length > 0 && (
+              <>
+                <span className="text-[10px] text-emerald-700 font-bold shrink-0">Gatilho:</span>
+                {flowTrigger.triggerKeywords.map((kw) => (
+                  <button
+                    key={kw}
+                    type="button"
+                    onClick={() => handleSendMessage(undefined, kw)}
+                    className="whitespace-nowrap px-2.5 py-1 rounded-full bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 text-emerald-900 font-semibold cursor-pointer transition-colors shadow-2xs text-[11px]"
+                  >
+                    "{kw}"
+                  </button>
+                ))}
+              </>
+            )}
+            <span className="text-[10px] text-slate-400 font-medium shrink-0">Respostas:</span>
             {['João Carlos', 'Sim, quero falar', 'Não no momento', 'Qual o preço?'].map((txt) => (
               <button
                 key={txt}

@@ -102,10 +102,18 @@
         "type": "text",
         "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
         "timestamp": "05:04 PM"
+      },
+      {
+        "id": "msg_1791733906791_9tx7c",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
+        "timestamp": "03:51 PM"
       }
     ],
-    "updatedAt": "2026-10-10T17:04:23.524Z",
-    "waitingVariableName": "nome"
+    "updatedAt": "2026-10-11T15:51:48.962Z",
+    "waitingVariableName": "nome",
+    "isWindowOpen": false
   },
   "5511999999999": {
     "phoneNumber": "5511999999999",
@@ -131,6 +139,7 @@
         "timestamp": "05:18 PM"
       }
     ],
-    "updatedAt": "2026-10-10T17:18:09.116Z"
+    "updatedAt": "2026-10-10T17:18:09.116Z",
+    "isWindowOpen": false
   }
 }
