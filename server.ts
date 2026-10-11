@@ -1,0 +1,995 @@
+import express, { Request, Response } from 'express';
+import { createServer as createViteServer } from 'vite';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Data directory for persistence
+const DATA_DIR = path.resolve(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const CONFIG_FILE = path.join(DATA_DIR, 'meta_config.json');
+const FLOW_FILE = path.join(DATA_DIR, 'flow.json');
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+const LOGS_FILE = path.join(DATA_DIR, 'api_logs.json');
+
+// Interface for API Logs
+interface ApiLogEntry {
+  id: string;
+  timestamp: string;
+  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'error';
+  direction: 'outbound' | 'inbound';
+  endpoint: string;
+  recipient?: string;
+  sender?: string;
+  messageType?: string;
+  httpStatus?: number;
+  success: boolean;
+  requestPayload?: any;
+  responseBody?: any;
+  metaErrorCode?: number;
+  metaErrorSubcode?: number;
+  metaErrorMessage?: string;
+  metaErrorType?: string;
+  metaFbTraceId?: string;
+  diagnosticTip?: string;
+}
+
+// In-memory logs store (keeps last 200 entries)
+let apiLogs: ApiLogEntry[] = [];
+if (fs.existsSync(LOGS_FILE)) {
+  try {
+    apiLogs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf-8'));
+  } catch (err) {
+    console.error('Error reading logs file:', err);
+  }
+}
+
+function saveLogsToFile() {
+  try {
+    fs.writeFileSync(LOGS_FILE, JSON.stringify(apiLogs.slice(0, 200), null, 2));
+  } catch (err) {
+    console.error('Error saving logs:', err);
+  }
+}
+
+function addApiLog(entry: Omit<ApiLogEntry, 'id' | 'timestamp'>): ApiLogEntry {
+  const fullEntry: ApiLogEntry = {
+    id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  };
+  apiLogs.unshift(fullEntry);
+  if (apiLogs.length > 200) {
+    apiLogs = apiLogs.slice(0, 200);
+  }
+  saveLogsToFile();
+  return fullEntry;
+}
+
+// Diagnostic helper: analyzes Meta WhatsApp Cloud API errors and gives human-readable fix tips in Portuguese
+function analyzeMetaError(status: number, data: any, recipient?: string): {
+  code?: number;
+  subcode?: number;
+  message: string;
+  type?: string;
+  fbtrace_id?: string;
+  tip: string;
+} {
+  const metaErr = data?.error || {};
+  const code = metaErr.code;
+  const subcode = metaErr.error_subcode;
+  const message = metaErr.message || (typeof data === 'string' ? data : `HTTP ${status}`);
+  const type = metaErr.type;
+  const fbtrace_id = metaErr.fbtrace_id;
+
+  let tip = 'Ocorreu um erro na API da Meta. Verifique o payload e a resposta completa abaixo.';
+
+  if (code === 190) {
+    tip =
+      '🔑 Token de Acesso Inválido ou Expirado: Se você estiver usando um token de teste temporário da Meta Developers, ele expira a cada 24 horas. Para uso contínuo, gere um "Token de Usuário do Sistema" permanente no Meta Business Manager com a permissão "whatsapp_business_messaging".';
+  } else if (code === 131037) {
+    tip =
+      '🏷️ Nome de Exibição Pendente de Aprovação (#131037): O número de telefone selecionado na Meta precisa ter o seu "Nome de Exibição" (Display Name) aprovado pela equipe da Meta antes de poder enviar mensagens ativas.\n\nComo resolver:\n1. Acesse o portal da Meta for Developers > WhatsApp > Configuração da API.\n2. Verifique se o seu número próprio está com o nome aprovado em "Gerenciador do WhatsApp" > "Contas do WhatsApp".\n3. Alternativamente, selecione o "Número de Teste" temporário fornecido gratuitamente pela Meta na caixa suspensa "De" (From) para testar imediatamente!';
+  } else if (code === 131030) {
+    tip =
+      `📱 Número Não Autorizado no Modo Teste: Se o seu app na Meta Developers ainda está em "Modo de Desenvolvimento", a Meta BLOQUEIA envio para números que não foram cadastrados previamente. Como resolver: Acesse Meta for Developers > Seu Aplicativo > WhatsApp > Configuração da API > Localize o campo "Para" (To) e adicione o número ${recipient || 'de destino'} para receber o código de verificação por SMS/WhatsApp.`;
+  } else if (code === 131047) {
+    tip =
+      '⏳ Janela de 24 Horas Fechada (Customer Care Window): A Meta exige que o cliente tenha enviado uma mensagem para o seu número nas últimas 24 horas para você poder enviar mensagens livres de texto/mídia. Se o cliente ainda não falou com o seu número, envie primeiro um "Oi" do celular de teste para o número do robô, ou utilize um Template/Modelo aprovado pela Meta.';
+  } else if (code === 100) {
+    tip =
+      '⚠️ Parâmetro Inválido: Verifique se o Phone Number ID está correto e se o número de telefone está com DDI e DDD (ex: 5511999999999 sem o sinal de + e sem traços). Se estiver enviando imagem ou PDF, certifique-se de que a URL é HTTPS pública e acessível sem autenticação.';
+  } else if (code === 133010) {
+    tip =
+      '📞 Número Não Registrado no WhatsApp: O número de destino não possui uma conta de WhatsApp ativa.';
+  } else if (code === 132000) {
+    tip =
+      '📄 Erro no Modelo de Mensagem ou Mídia: Os parâmetros de mídia enviados não foram aceitos pela Meta.';
+  } else if (code === 130429) {
+    tip =
+      '⚡ Limite de Taxa (Rate Limit) Atingido: Foram feitos muitos disparos em pouco tempo para este número ou a conta excedeu o limite do tier da Meta.';
+  } else if (status === 401 || status === 403) {
+    tip =
+      '🔒 Permissão Negada: Verifique se o seu Access Token possui a permissão "whatsapp_business_messaging" e acesso à conta WhatsApp Business correta.';
+  } else if (status === 404) {
+    tip =
+      '🔍 Phone Number ID Inexistente: A Meta não encontrou o Phone Number ID informado. Verifique o ID no painel da Meta Developers > WhatsApp > Configuração da API.';
+  }
+
+  return { code, subcode, message, type, fbtrace_id, tip };
+}
+
+// Initial default configuration
+let metaConfig = {
+  phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+  accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+  wabaId: process.env.WHATSAPP_WABA_ID || '',
+  verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'fluxozap_webhook_secret_2026',
+  testPhoneNumber: '',
+};
+
+if (fs.existsSync(CONFIG_FILE)) {
+  try {
+    metaConfig = { ...metaConfig, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) };
+  } catch (err) {
+    console.error('Error reading config file:', err);
+  }
+}
+
+// Initial default flow
+const defaultFlow = {
+  id: 'flow_welcome',
+  name: 'Fluxo de Atendimento e Apresentação',
+  description: 'Boas-vindas automáticas, envio de imagem de apresentação, catálogo em PDF e coleta de dados.',
+  updatedAt: new Date().toISOString(),
+  nodes: [
+    {
+      id: 'node_start',
+      type: 'start',
+      position: { x: 100, y: 150 },
+      data: {
+        label: 'Gatilho de Início',
+        type: 'start',
+        text: 'Qualquer mensagem recebida',
+      },
+    },
+    {
+      id: 'node_welcome_msg',
+      type: 'send_text',
+      position: { x: 380, y: 150 },
+      data: {
+        label: 'Mensagem de Boas-Vindas',
+        type: 'send_text',
+        text: 'Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?',
+      },
+    },
+    {
+      id: 'node_wait_name',
+      type: 'wait_reply',
+      position: { x: 680, y: 150 },
+      data: {
+        label: 'Aguardar Nome',
+        type: 'wait_reply',
+        variableName: 'nome',
+        expectedType: 'text',
+        placeholder: 'Aguardando o cliente digitar o nome...',
+      },
+    },
+    {
+      id: 'node_nice_meet',
+      type: 'send_text',
+      position: { x: 980, y: 150 },
+      data: {
+        label: 'Saudação Personalizada',
+        type: 'send_text',
+        text: 'Prazer em falar com você, *{{nome}}*! 😊\n\nVeja abaixo uma prévia das nossas soluções e o documento oficial que preparamos:',
+      },
+    },
+    {
+      id: 'node_send_img',
+      type: 'send_image',
+      position: { x: 1280, y: 150 },
+      data: {
+        label: 'Enviar Imagem',
+        type: 'send_image',
+        mediaUrl: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop',
+        caption: '🚀 Plataforma de Automação Inteligente para WhatsApp',
+      },
+    },
+    {
+      id: 'node_send_doc',
+      type: 'send_document',
+      position: { x: 1580, y: 150 },
+      data: {
+        label: 'Enviar Documento PDF',
+        type: 'send_document',
+        mediaUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+        filename: 'apresentacao_institucional.pdf',
+        caption: '📄 Aqui está a apresentação completa em PDF.',
+      },
+    },
+    {
+      id: 'node_wait_interest',
+      type: 'wait_reply',
+      position: { x: 1880, y: 150 },
+      data: {
+        label: 'Aguardar Interesse',
+        type: 'wait_reply',
+        variableName: 'interesse',
+        expectedType: 'text',
+        placeholder: 'Você gostaria de falar com um especialista agora? (sim/não)',
+      },
+    },
+    {
+      id: 'node_final_msg',
+      type: 'send_text',
+      position: { x: 2180, y: 150 },
+      data: {
+        label: 'Mensagem de Encerramento',
+        type: 'send_text',
+        text: 'Perfeito, *{{nome}}*! Registramos seu interesse ({{interesse}}). Um de nossos consultores entrará em contato em instantes!',
+      },
+    },
+  ],
+  edges: [
+    { id: 'e1', source: 'node_start', target: 'node_welcome_msg' },
+    { id: 'e2', source: 'node_welcome_msg', target: 'node_wait_name' },
+    { id: 'e3', source: 'node_wait_name', target: 'node_nice_meet' },
+    { id: 'e4', source: 'node_nice_meet', target: 'node_send_img' },
+    { id: 'e5', source: 'node_send_img', target: 'node_send_doc' },
+    { id: 'e6', source: 'node_send_doc', target: 'node_wait_interest' },
+    { id: 'e7', source: 'node_wait_interest', target: 'node_final_msg' },
+  ],
+};
+
+let currentFlow = defaultFlow;
+if (fs.existsSync(FLOW_FILE)) {
+  try {
+    currentFlow = JSON.parse(fs.readFileSync(FLOW_FILE, 'utf-8'));
+  } catch (err) {
+    console.error('Error reading flow file:', err);
+  }
+}
+
+// User sessions by phone number (or simulated session 'simulator_user')
+interface SessionData {
+  phoneNumber: string;
+  activeFlowId: string;
+  currentNodeId: string | null;
+  waitingForInput: boolean;
+  waitingVariableName?: string;
+  variables: Record<string, string>;
+  history: Array<{
+    id: string;
+    sender: 'bot' | 'user' | 'system';
+    type: 'text' | 'image' | 'document' | 'info';
+    content: string;
+    mediaUrl?: string;
+    filename?: string;
+    timestamp: string;
+  }>;
+  updatedAt: string;
+}
+
+const sessions: Map<string, SessionData> = new Map();
+
+function saveSessionsToFile() {
+  try {
+    const obj = Object.fromEntries(sessions);
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error('Error saving sessions:', err);
+  }
+}
+
+if (fs.existsSync(SESSIONS_FILE)) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
+    for (const [key, val] of Object.entries(saved)) {
+      sessions.set(key, val as SessionData);
+    }
+  } catch (err) {
+    console.error('Error loading sessions:', err);
+  }
+}
+
+function getOrCreateSession(phoneNumber: string): SessionData {
+  let session = sessions.get(phoneNumber);
+  if (!session) {
+    session = {
+      phoneNumber,
+      activeFlowId: currentFlow.id,
+      currentNodeId: null,
+      waitingForInput: false,
+      variables: { phone: phoneNumber },
+      history: [],
+      updatedAt: new Date().toISOString(),
+    };
+    sessions.set(phoneNumber, session);
+    saveSessionsToFile();
+  }
+  return session;
+}
+
+// Replace template variables like {{name}} with collected values
+function replaceVariables(text: string, variables: Record<string, string>): string {
+  if (!text) return '';
+  return text.replace(/\{\{\s*([\w_]+)\s*\}\}/g, (_, key) => {
+    return variables[key] !== undefined ? variables[key] : `{{${key}}}`;
+  });
+}
+
+// Send real message using Meta WhatsApp Cloud API with full logging
+async function sendMetaWhatsAppMessage(
+  recipientPhone: string,
+  messageType: 'text' | 'image' | 'document',
+  payload: { text?: string; mediaUrl?: string; caption?: string; filename?: string }
+): Promise<{ success: boolean; data?: any; error?: string; logEntry?: ApiLogEntry }> {
+  // Sanitize phone number (strip + and spaces)
+  const cleanPhone = recipientPhone.replace(/\D/g, '');
+  const endpoint = `POST /v21.0/${metaConfig.phoneNumberId || '{phoneNumberId}'}/messages`;
+
+  if (!metaConfig.phoneNumberId || !metaConfig.accessToken) {
+    const log = addApiLog({
+      type: 'error',
+      direction: 'outbound',
+      endpoint,
+      recipient: cleanPhone,
+      messageType,
+      success: false,
+      metaErrorMessage: 'Credenciais ausentes: Phone Number ID ou Access Token não configurados.',
+      diagnosticTip:
+        'Acesse a aba "Configuração Meta API" e preencha o Phone Number ID e o Access Token gerados no portal da Meta Developers.',
+    });
+
+    return {
+      success: false,
+      error: 'WhatsApp Cloud API credentials not configured (Phone Number ID or Access Token missing).',
+      logEntry: log,
+    };
+  }
+
+  let body: any = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanPhone,
+  };
+
+  if (messageType === 'text') {
+    body.type = 'text';
+    body.text = {
+      preview_url: false,
+      body: payload.text || '',
+    };
+  } else if (messageType === 'image') {
+    body.type = 'image';
+    body.image = {
+      link: payload.mediaUrl,
+      caption: payload.caption || '',
+    };
+  } else if (messageType === 'document') {
+    body.type = 'document';
+    body.document = {
+      link: payload.mediaUrl,
+      caption: payload.caption || '',
+      filename: payload.filename || 'documento.pdf',
+    };
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v21.0/${metaConfig.phoneNumberId}/messages`;
+    console.log(`[WhatsApp API Request] Envio para ${cleanPhone} (${messageType})...`);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${metaConfig.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    let data: any;
+    const rawText = await res.text();
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = { rawResponse: rawText };
+    }
+
+    if (!res.ok) {
+      const diag = analyzeMetaError(res.status, data, cleanPhone);
+      console.error(`[WhatsApp API Error] HTTP ${res.status}:`, JSON.stringify(data));
+
+      const log = addApiLog({
+        type: 'error',
+        direction: 'outbound',
+        endpoint,
+        recipient: cleanPhone,
+        messageType,
+        httpStatus: res.status,
+        success: false,
+        requestPayload: body,
+        responseBody: data,
+        metaErrorCode: diag.code,
+        metaErrorSubcode: diag.subcode,
+        metaErrorMessage: diag.message,
+        metaErrorType: diag.type,
+        metaFbTraceId: diag.fbtrace_id,
+        diagnosticTip: diag.tip,
+      });
+
+      return {
+        success: false,
+        error: `Meta API Erro (${res.status} - Código ${diag.code || 'N/A'}): ${diag.message}`,
+        data,
+        logEntry: log,
+      };
+    }
+
+    console.log(`[WhatsApp API Success] Enviado para ${cleanPhone}:`, data);
+    const log = addApiLog({
+      type: 'outgoing_message',
+      direction: 'outbound',
+      endpoint,
+      recipient: cleanPhone,
+      messageType,
+      httpStatus: res.status,
+      success: true,
+      requestPayload: body,
+      responseBody: data,
+    });
+
+    return { success: true, data, logEntry: log };
+  } catch (err: any) {
+    console.error('[WhatsApp API Exception]:', err);
+    const log = addApiLog({
+      type: 'error',
+      direction: 'outbound',
+      endpoint,
+      recipient: cleanPhone,
+      messageType,
+      success: false,
+      requestPayload: body,
+      metaErrorMessage: err.message || 'Falha de rede ao conectar à Meta API',
+      diagnosticTip: 'Verifique a conexão com a internet ou se o servidor consegue acessar graph.facebook.com.',
+    });
+
+    return {
+      success: false,
+      error: err.message || 'Network error calling Meta API',
+      logEntry: log,
+    };
+  }
+}
+
+// Engine step runner: executes nodes sequentially until a wait_reply or flow end
+// Returns array of errors if any WhatsApp message fails
+async function runFlowStep(
+  session: SessionData,
+  isLiveWhatsApp: boolean = false
+): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
+  const nodes = currentFlow.nodes;
+  const edges = currentFlow.edges;
+  const executionErrors: string[] = [];
+  let lastLog: ApiLogEntry | undefined;
+
+  // If session hasn't started yet, find start node
+  if (!session.currentNodeId) {
+    const startNode = nodes.find((n: any) => n.type === 'start') || nodes[0];
+    if (!startNode) return { executionErrors };
+    session.currentNodeId = startNode.id;
+  }
+
+  let safetyCounter = 0;
+  while (safetyCounter < 30) {
+    safetyCounter++;
+    const currentNode = nodes.find((n: any) => n.id === session.currentNodeId);
+    if (!currentNode) break;
+
+    // Handle node action
+    if (currentNode.type === 'send_text') {
+      const parsedText = replaceVariables(currentNode.data.text || '', session.variables);
+      const msgItem = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        sender: 'bot' as const,
+        type: 'text' as const,
+        content: parsedText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      session.history.push(msgItem);
+
+      if (isLiveWhatsApp) {
+        const sendResult = await sendMetaWhatsAppMessage(session.phoneNumber, 'text', { text: parsedText });
+        if (sendResult.logEntry) lastLog = sendResult.logEntry;
+        if (!sendResult.success) {
+          executionErrors.push(sendResult.error || 'Erro ao enviar mensagem de texto.');
+          // Break execution on error so we don't bombard Meta if token or number is bad
+          break;
+        }
+      }
+    } else if (currentNode.type === 'send_image') {
+      const parsedCaption = replaceVariables(currentNode.data.caption || '', session.variables);
+      const msgItem = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        sender: 'bot' as const,
+        type: 'image' as const,
+        content: parsedCaption,
+        mediaUrl: currentNode.data.mediaUrl,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      session.history.push(msgItem);
+
+      if (isLiveWhatsApp && currentNode.data.mediaUrl) {
+        const sendResult = await sendMetaWhatsAppMessage(session.phoneNumber, 'image', {
+          mediaUrl: currentNode.data.mediaUrl,
+          caption: parsedCaption,
+        });
+        if (sendResult.logEntry) lastLog = sendResult.logEntry;
+        if (!sendResult.success) {
+          executionErrors.push(sendResult.error || 'Erro ao enviar imagem.');
+          break;
+        }
+      }
+    } else if (currentNode.type === 'send_document') {
+      const parsedCaption = replaceVariables(currentNode.data.caption || '', session.variables);
+      const msgItem = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        sender: 'bot' as const,
+        type: 'document' as const,
+        content: parsedCaption,
+        mediaUrl: currentNode.data.mediaUrl,
+        filename: currentNode.data.filename || 'documento.pdf',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      session.history.push(msgItem);
+
+      if (isLiveWhatsApp && currentNode.data.mediaUrl) {
+        const sendResult = await sendMetaWhatsAppMessage(session.phoneNumber, 'document', {
+          mediaUrl: currentNode.data.mediaUrl,
+          caption: parsedCaption,
+          filename: currentNode.data.filename,
+        });
+        if (sendResult.logEntry) lastLog = sendResult.logEntry;
+        if (!sendResult.success) {
+          executionErrors.push(sendResult.error || 'Erro ao enviar documento.');
+          break;
+        }
+      }
+    } else if (currentNode.type === 'wait_reply') {
+      // Pause execution here! Wait for user input.
+      session.waitingForInput = true;
+      session.waitingVariableName = currentNode.data.variableName || 'user_reply';
+      session.updatedAt = new Date().toISOString();
+      saveSessionsToFile();
+      return { executionErrors, lastLog };
+    } else if (currentNode.type === 'delay') {
+      const seconds = (currentNode.data as any)?.delaySeconds || 2;
+      // In live or simulator, wait brief pause if requested
+      if (seconds > 0) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(seconds * 1000, 5000)));
+      }
+    }
+
+    // Find next connected edge
+    const outgoingEdge = edges.find((e: any) => e.source === currentNode.id);
+    if (outgoingEdge) {
+      session.currentNodeId = outgoingEdge.target;
+    } else {
+      // End of flow reached
+      session.currentNodeId = null;
+      session.waitingForInput = false;
+      break;
+    }
+  }
+
+  session.updatedAt = new Date().toISOString();
+  saveSessionsToFile();
+  return { executionErrors, lastLog };
+}
+
+// User sent a message to the bot
+async function handleIncomingUserMessage(
+  session: SessionData,
+  userMessageText: string,
+  isLiveWhatsApp: boolean = false
+): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
+  // Add to session history
+  session.history.push({
+    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    sender: 'user',
+    type: 'text',
+    content: userMessageText,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  });
+
+  const nodes = currentFlow.nodes;
+  const edges = currentFlow.edges;
+
+  // Check if session was currently waiting for user input
+  if (session.waitingForInput && session.currentNodeId) {
+    const currentNode = nodes.find((n: any) => n.id === session.currentNodeId);
+    if (currentNode && currentNode.type === 'wait_reply') {
+      // Store into variable
+      const varName = session.waitingVariableName || currentNode.data.variableName || 'user_reply';
+      session.variables[varName] = userMessageText;
+      session.waitingForInput = false;
+      session.waitingVariableName = undefined;
+
+      // Find next node from this wait_reply
+      const outgoingEdge = edges.find((e: any) => e.source === currentNode.id);
+      if (outgoingEdge) {
+        session.currentNodeId = outgoingEdge.target;
+        // Continue execution of flow
+        return await runFlowStep(session, isLiveWhatsApp);
+      } else {
+        session.currentNodeId = null;
+        saveSessionsToFile();
+        return { executionErrors: [] };
+      }
+    }
+  }
+
+  // If not waiting or no active node, start flow from beginning
+  session.currentNodeId = null;
+  session.waitingForInput = false;
+  return await runFlowStep(session, isLiveWhatsApp);
+}
+
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3000;
+
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true }));
+
+  // API: Get & Save Meta Cloud API Config
+  app.get('/api/config', (_req: Request, res: Response) => {
+    res.json({
+      ...metaConfig,
+      hasAccessToken: Boolean(metaConfig.accessToken),
+      maskedToken: metaConfig.accessToken
+        ? `${metaConfig.accessToken.substring(0, 6)}...${metaConfig.accessToken.slice(-4)}`
+        : '',
+    });
+  });
+
+  app.post('/api/config', (req: Request, res: Response) => {
+    const { phoneNumberId, accessToken, wabaId, verifyToken, testPhoneNumber } = req.body;
+    metaConfig = {
+      phoneNumberId: phoneNumberId?.trim() || metaConfig.phoneNumberId,
+      accessToken: accessToken?.trim() || metaConfig.accessToken,
+      wabaId: wabaId?.trim() || metaConfig.wabaId,
+      verifyToken: verifyToken?.trim() || metaConfig.verifyToken,
+      testPhoneNumber: testPhoneNumber?.trim() || metaConfig.testPhoneNumber,
+    };
+    try {
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(metaConfig, null, 2));
+      res.json({ success: true, message: 'Configurações salvas com sucesso!' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API: Logs Endpoints
+  app.get('/api/logs', (req: Request, res: Response) => {
+    const filter = req.query.filter as string;
+    let filtered = apiLogs;
+    if (filter === 'errors') {
+      filtered = apiLogs.filter((l) => !l.success);
+    } else if (filter === 'outbound') {
+      filtered = apiLogs.filter((l) => l.direction === 'outbound');
+    } else if (filter === 'inbound') {
+      filtered = apiLogs.filter((l) => l.direction === 'inbound');
+    }
+    res.json({
+      logs: filtered,
+      total: apiLogs.length,
+      errorsCount: apiLogs.filter((l) => !l.success).length,
+    });
+  });
+
+  app.delete('/api/logs', (_req: Request, res: Response) => {
+    apiLogs = [];
+    saveLogsToFile();
+    res.json({ success: true, message: 'Logs limpos com sucesso.' });
+  });
+
+  // API: Test Meta WhatsApp API Connection
+  app.post('/api/config/test', async (req: Request, res: Response) => {
+    const { phoneNumberId, accessToken } = req.body;
+    const pId = phoneNumberId || metaConfig.phoneNumberId;
+    const token = accessToken || metaConfig.accessToken;
+
+    if (!pId || !token) {
+      addApiLog({
+        type: 'error',
+        direction: 'outbound',
+        endpoint: 'GET /v21.0/{phoneNumberId}',
+        success: false,
+        metaErrorMessage: 'Parâmetros ausentes para teste de conexão.',
+        diagnosticTip: 'Informe o Phone Number ID e o Access Token antes de testar.',
+      });
+
+      return res.status(400).json({
+        success: false,
+        error: 'É necessário informar Phone Number ID e Access Token.',
+      });
+    }
+
+    try {
+      const url = `https://graph.facebook.com/v21.0/${pId}`;
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const rawText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        data = { raw: rawText };
+      }
+
+      if (!response.ok) {
+        const diag = analyzeMetaError(response.status, data);
+        const log = addApiLog({
+          type: 'connection_test',
+          direction: 'outbound',
+          endpoint: `GET /v21.0/${pId}`,
+          httpStatus: response.status,
+          success: false,
+          responseBody: data,
+          metaErrorCode: diag.code,
+          metaErrorSubcode: diag.subcode,
+          metaErrorMessage: diag.message,
+          metaErrorType: diag.type,
+          metaFbTraceId: diag.fbtrace_id,
+          diagnosticTip: diag.tip,
+        });
+
+        return res.status(response.status).json({
+          success: false,
+          error: `Meta API Erro (${response.status} - Código ${diag.code || 'N/A'}): ${diag.message}`,
+          diagnosticTip: diag.tip,
+          rawError: data,
+          logEntry: log,
+        });
+      }
+
+      const log = addApiLog({
+        type: 'connection_test',
+        direction: 'outbound',
+        endpoint: `GET /v21.0/${pId}`,
+        httpStatus: response.status,
+        success: true,
+        responseBody: data,
+      });
+
+      return res.json({
+        success: true,
+        message: 'Conexão com a Meta WhatsApp API validada com sucesso!',
+        data: {
+          verifiedName: data.verified_name || data.display_phone_number,
+          displayPhoneNumber: data.display_phone_number,
+          qualityRating: data.quality_rating,
+          id: data.id,
+        },
+        logEntry: log,
+      });
+    } catch (err: any) {
+      const log = addApiLog({
+        type: 'error',
+        direction: 'outbound',
+        endpoint: `GET /v21.0/${pId}`,
+        success: false,
+        metaErrorMessage: err.message,
+        diagnosticTip: 'Falha de rede ao conectar com graph.facebook.com.',
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+        logEntry: log,
+      });
+    }
+  });
+
+  // API: Get & Save Flow
+  app.get('/api/flow', (_req: Request, res: Response) => {
+    res.json(currentFlow);
+  });
+
+  app.post('/api/flow', (req: Request, res: Response) => {
+    try {
+      currentFlow = {
+        ...req.body,
+        updatedAt: new Date().toISOString(),
+      };
+      fs.writeFileSync(FLOW_FILE, JSON.stringify(currentFlow, null, 2));
+      res.json({ success: true, message: 'Fluxo salvo com sucesso!' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API: Webhook Verification for Meta (GET)
+  app.get('/api/webhook', (req: Request, res: Response) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === metaConfig.verifyToken) {
+      console.log('Meta Webhook verified successfully!');
+      addApiLog({
+        type: 'incoming_webhook',
+        direction: 'inbound',
+        endpoint: 'GET /api/webhook (Challenge Handshake)',
+        success: true,
+        requestPayload: req.query,
+      });
+      return res.status(200).send(challenge);
+    }
+
+    addApiLog({
+      type: 'error',
+      direction: 'inbound',
+      endpoint: 'GET /api/webhook',
+      success: false,
+      requestPayload: req.query,
+      metaErrorMessage: 'Token de verificação do Webhook incompatível.',
+      diagnosticTip: `O token enviado pela Meta (${token}) não corresponde ao verifyToken configurado (${metaConfig.verifyToken}).`,
+    });
+    return res.status(403).send('Forbidden verify token mismatch');
+  });
+
+  // API: Webhook Event Receiver from Meta (POST)
+  app.post('/api/webhook', async (req: Request, res: Response) => {
+    res.sendStatus(200); // Acknowledge Meta immediately
+
+    try {
+      const body = req.body;
+      addApiLog({
+        type: 'incoming_webhook',
+        direction: 'inbound',
+        endpoint: 'POST /api/webhook',
+        success: true,
+        requestPayload: body,
+      });
+
+      if (body.object === 'whatsapp_business_account') {
+        for (const entry of body.entry || []) {
+          for (const change of entry.changes || []) {
+            const value = change.value;
+            if (value && value.messages && value.messages.length > 0) {
+              const msg = value.messages[0];
+              const from = msg.from;
+              let textContent = '';
+
+              if (msg.type === 'text') {
+                textContent = msg.text.body;
+              } else if (msg.type === 'interactive') {
+                textContent = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '';
+              } else {
+                textContent = `[Mensagem recebida tipo ${msg.type}]`;
+              }
+
+              console.log(`Received incoming WhatsApp message from ${from}: ${textContent}`);
+              const session = getOrCreateSession(from);
+              await handleIncomingUserMessage(session, textContent, true);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('Error handling webhook message:', err);
+      addApiLog({
+        type: 'error',
+        direction: 'inbound',
+        endpoint: 'POST /api/webhook',
+        success: false,
+        metaErrorMessage: err.message,
+      });
+    }
+  });
+
+  // API: Trigger Flow Manually for a Live WhatsApp Number
+  app.post('/api/send-live', async (req: Request, res: Response) => {
+    const { phoneNumber } = req.body;
+    if (!phoneNumber) {
+      return res.status(400).json({ success: false, error: 'Número de telefone é obrigatório.' });
+    }
+
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const session = getOrCreateSession(cleanPhone);
+    session.currentNodeId = null;
+    session.waitingForInput = false;
+
+    try {
+      const { executionErrors, lastLog } = await runFlowStep(session, true);
+
+      if (executionErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: executionErrors[0],
+          allErrors: executionErrors,
+          diagnosticTip: lastLog?.diagnosticTip,
+          metaResponse: lastLog?.responseBody,
+          logEntry: lastLog,
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Fluxo iniciado para ${cleanPhone} via WhatsApp Oficial!`,
+        logEntry: lastLog,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API: Simulator Endpoints
+  app.get('/api/simulator/session', (_req: Request, res: Response) => {
+    const session = getOrCreateSession('simulator_user');
+    res.json(session);
+  });
+
+  app.post('/api/simulator/send', async (req: Request, res: Response) => {
+    const { message } = req.body;
+    const session = getOrCreateSession('simulator_user');
+    await handleIncomingUserMessage(session, message || 'oi', false);
+    res.json(session);
+  });
+
+  app.post('/api/simulator/reset', async (_req: Request, res: Response) => {
+    const session: SessionData = {
+      phoneNumber: 'simulator_user',
+      activeFlowId: currentFlow.id,
+      currentNodeId: null,
+      waitingForInput: false,
+      variables: { phone: '+55 11 99999-0000', nome: '' },
+      history: [],
+      updatedAt: new Date().toISOString(),
+    };
+    sessions.set('simulator_user', session);
+    // Start fresh flow automatically
+    await runFlowStep(session, false);
+    saveSessionsToFile();
+    res.json(session);
+  });
+
+  // API: Get all active sessions / contacts
+  app.get('/api/sessions', (_req: Request, res: Response) => {
+    const list = Array.from(sessions.values()).filter((s) => s.phoneNumber !== 'simulator_user');
+    res.json(list);
+  });
+
+  // Vite middleware in dev or static files in production
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running at http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

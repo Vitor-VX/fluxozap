@@ -1,0 +1,100 @@
+[
+  {
+    "id": "log_1791652689116_fzgd2",
+    "timestamp": "2026-10-10T17:18:09.116Z",
+    "type": "error",
+    "direction": "outbound",
+    "endpoint": "POST /v21.0/1350788331451176/messages",
+    "recipient": "5511999999999",
+    "messageType": "text",
+    "httpStatus": 400,
+    "success": false,
+    "requestPayload": {
+      "messaging_product": "whatsapp",
+      "recipient_type": "individual",
+      "to": "5511999999999",
+      "type": "text",
+      "text": {
+        "preview_url": false,
+        "body": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?"
+      }
+    },
+    "responseBody": {
+      "error": {
+        "message": "(#131037) WhatsApp provided number needs display name approval before message can be sent.",
+        "code": 131037,
+        "type": "OAuthException",
+        "error_data": {
+          "messaging_product": "whatsapp",
+          "details": "WhatsApp provided number needs display name approval before message can be sent."
+        },
+        "fbtrace_id": "ATTBY7eRu6sEf8U3lyfnk6-"
+      }
+    },
+    "metaErrorCode": 131037,
+    "metaErrorMessage": "(#131037) WhatsApp provided number needs display name approval before message can be sent.",
+    "metaErrorType": "OAuthException",
+    "metaFbTraceId": "ATTBY7eRu6sEf8U3lyfnk6-",
+    "diagnosticTip": "🏷️ Nome de Exibição Pendente de Aprovação (#131037): O número de telefone selecionado na Meta precisa ter o seu \"Nome de Exibição\" (Display Name) aprovado pela equipe da Meta antes de poder enviar mensagens ativas.\n\nComo resolver:\n1. Acesse o portal da Meta for Developers > WhatsApp > Configuração da API.\n2. Verifique se o seu número próprio está com o nome aprovado em \"Gerenciador do WhatsApp\" > \"Contas do WhatsApp\".\n3. Alternativamente, selecione o \"Número de Teste\" temporário fornecido gratuitamente pela Meta na caixa suspensa \"De\" (From) para testar imediatamente!"
+  },
+  {
+    "id": "log_1791652678695_cnlsk",
+    "timestamp": "2026-10-10T17:17:58.695Z",
+    "type": "error",
+    "direction": "outbound",
+    "endpoint": "POST /v21.0/1350788331451176/messages",
+    "recipient": "5511999999999",
+    "messageType": "text",
+    "httpStatus": 400,
+    "success": false,
+    "requestPayload": {
+      "messaging_product": "whatsapp",
+      "recipient_type": "individual",
+      "to": "5511999999999",
+      "type": "text",
+      "text": {
+        "preview_url": false,
+        "body": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?"
+      }
+    },
+    "responseBody": {
+      "error": {
+        "message": "(#131037) WhatsApp provided number needs display name approval before message can be sent.",
+        "code": 131037,
+        "type": "OAuthException",
+        "error_data": {
+          "messaging_product": "whatsapp",
+          "details": "WhatsApp provided number needs display name approval before message can be sent."
+        },
+        "fbtrace_id": "A4hmPja3g1QRaZSeJcA0-7H"
+      }
+    },
+    "metaErrorCode": 131037,
+    "metaErrorMessage": "(#131037) WhatsApp provided number needs display name approval before message can be sent.",
+    "metaErrorType": "OAuthException",
+    "metaFbTraceId": "A4hmPja3g1QRaZSeJcA0-7H",
+    "diagnosticTip": "Ocorreu um erro na API da Meta. Verifique o payload e a resposta completa abaixo."
+  },
+  {
+    "id": "log_1791652672359_vomti",
+    "timestamp": "2026-10-10T17:17:52.359Z",
+    "type": "connection_test",
+    "direction": "outbound",
+    "endpoint": "GET /v21.0/123456789",
+    "httpStatus": 401,
+    "success": false,
+    "responseBody": {
+      "error": {
+        "message": "Invalid OAuth access token - Cannot parse access token",
+        "type": "OAuthException",
+        "code": 190,
+        "fbtrace_id": "AFLMz3fcQ7ClCUp-DCYq6V9"
+      }
+    },
+    "metaErrorCode": 190,
+    "metaErrorMessage": "Invalid OAuth access token - Cannot parse access token",
+    "metaErrorType": "OAuthException",
+    "metaFbTraceId": "AFLMz3fcQ7ClCUp-DCYq6V9",
+    "diagnosticTip": "🔑 Token de Acesso Inválido ou Expirado: Se você estiver usando um token de teste temporário da Meta Developers, ele expira a cada 24 horas. Para uso contínuo, gere um \"Token de Usuário do Sistema\" permanente no Meta Business Manager com a permissão \"whatsapp_business_messaging\"."
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "name": "FluxoZap - WhatsApp Flow Builder",
+  "description": "Plataforma visual estilo Typebot e 2chat para automação de WhatsApp com API Oficial da Meta, editor visual React Flow, blocos de texto, imagem, documento e espera de resposta.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

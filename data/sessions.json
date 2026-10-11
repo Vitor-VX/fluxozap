@@ -1,0 +1,136 @@
+{
+  "simulator_user": {
+    "phoneNumber": "simulator_user",
+    "activeFlowId": "flow_welcome",
+    "currentNodeId": "node_wait_name",
+    "waitingForInput": true,
+    "variables": {
+      "phone": "+55 11 99999-0000",
+      "nome": "João Silva",
+      "interesse": "Sim, quero conversar"
+    },
+    "history": [
+      {
+        "id": "msg_1791645192136_9esx5",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
+        "timestamp": "03:13 PM"
+      },
+      {
+        "id": "msg_1791645195445_117mn",
+        "sender": "user",
+        "type": "text",
+        "content": "João Silva",
+        "timestamp": "03:13 PM"
+      },
+      {
+        "id": "msg_1791645195445_sa8ah",
+        "sender": "bot",
+        "type": "text",
+        "content": "Prazer em falar com você, *João Silva*! 😊\n\nVeja abaixo uma prévia das nossas soluções e o documento oficial que preparamos:",
+        "timestamp": "03:13 PM"
+      },
+      {
+        "id": "msg_1791645195445_jbi0v",
+        "sender": "bot",
+        "type": "image",
+        "content": "🚀 Plataforma de Automação Inteligente para WhatsApp",
+        "mediaUrl": "https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop",
+        "timestamp": "03:13 PM"
+      },
+      {
+        "id": "msg_1791645195445_21dsq",
+        "sender": "bot",
+        "type": "document",
+        "content": "📄 Aqui está a apresentação completa em PDF.",
+        "mediaUrl": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+        "filename": "apresentacao_institucional.pdf",
+        "timestamp": "03:13 PM"
+      },
+      {
+        "id": "msg_1791645198553_9aajz",
+        "sender": "user",
+        "type": "text",
+        "content": "Sim, quero conversar",
+        "timestamp": "03:13 PM"
+      },
+      {
+        "id": "msg_1791645198553_z34na",
+        "sender": "bot",
+        "type": "text",
+        "content": "Perfeito, *João Silva*! Registramos seu interesse (Sim, quero conversar). Um de nossos consultores entrará em contato em instantes!",
+        "timestamp": "03:13 PM"
+      },
+      {
+        "id": "msg_1791645345776_uzyrc",
+        "sender": "user",
+        "type": "text",
+        "content": "João Carlos",
+        "timestamp": "03:15 PM"
+      },
+      {
+        "id": "msg_1791645345783_uz000",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
+        "timestamp": "03:15 PM"
+      }
+    ],
+    "updatedAt": "2026-10-10T15:15:45.783Z",
+    "waitingVariableName": "nome"
+  },
+  "5569993161840": {
+    "phoneNumber": "5569993161840",
+    "activeFlowId": "flow_welcome",
+    "currentNodeId": "node_wait_name",
+    "waitingForInput": true,
+    "variables": {
+      "phone": "5569993161840"
+    },
+    "history": [
+      {
+        "id": "msg_1791651612854_dnq01",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
+        "timestamp": "05:00 PM"
+      },
+      {
+        "id": "msg_1791651862838_8l54z",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
+        "timestamp": "05:04 PM"
+      }
+    ],
+    "updatedAt": "2026-10-10T17:04:23.524Z",
+    "waitingVariableName": "nome"
+  },
+  "5511999999999": {
+    "phoneNumber": "5511999999999",
+    "activeFlowId": "flow_welcome",
+    "currentNodeId": "node_welcome_msg",
+    "waitingForInput": false,
+    "variables": {
+      "phone": "5511999999999"
+    },
+    "history": [
+      {
+        "id": "msg_1791652678344_plquv",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
+        "timestamp": "05:17 PM"
+      },
+      {
+        "id": "msg_1791652688810_1yk9a",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! 👋 Seja muito bem-vindo ao nosso atendimento oficial no WhatsApp.\n\nComo posso chamar você?",
+        "timestamp": "05:18 PM"
+      }
+    ],
+    "updatedAt": "2026-10-10T17:18:09.116Z"
+  }
+}
