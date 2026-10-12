@@ -11,16 +11,16 @@
       "whatsapp_nome": "João Silva",
       "telefone": "+55 11 99999-0000",
       "numero_whatsapp": "+55 11 99999-0000",
-      "data": "11/10/2026",
-      "data_atual": "11/10/2026",
-      "hora": "22:14:39",
-      "hora_atual": "22:14:39",
-      "data_hora": "11/10/2026 22:14:39",
-      "dia": "11",
+      "data": "12/10/2026",
+      "data_atual": "12/10/2026",
+      "hora": "16:15:32",
+      "hora_atual": "16:15:32",
+      "data_hora": "12/10/2026 16:15:32",
+      "dia": "12",
       "mes": "10",
       "ano": "2026",
-      "dia_semana": "domingo",
-      "timestamp": "2026-10-12T02:14:39.336Z"
+      "dia_semana": "segunda-feira",
+      "timestamp": "2026-10-12T20:15:32.463Z"
     },
     "history": [
       {
@@ -108,78 +108,71 @@
       "telefone": "+55 11 99999-0000",
       "phone": "+55 11 99999-0000",
       "numero_whatsapp": "+55 11 99999-0000",
-      "data": "11/10/2026",
-      "data_atual": "11/10/2026",
-      "hora": "22:14:39",
-      "hora_atual": "22:14:39",
-      "data_hora": "11/10/2026 22:14:39",
-      "dia": "11",
+      "data": "12/10/2026",
+      "data_atual": "12/10/2026",
+      "hora": "16:15:32",
+      "hora_atual": "16:15:32",
+      "data_hora": "12/10/2026 16:15:32",
+      "dia": "12",
       "mes": "10",
       "ano": "2026",
-      "dia_semana": "domingo",
-      "timestamp": "2026-10-12T02:14:39.339Z",
-      "xpag_status": "simulated",
-      "xpag_payment_status": "simulated",
-      "xpag_amount": "70",
-      "xpag_currency": "MXN",
-      "xpag_method": "SPEI",
-      "xpag_provider": "",
-      "xpag_fee": "",
-      "xpag_external_id": "XPAG-SIMULACAO",
-      "xpag_transaction_id": "",
-      "xpag_request_number": "",
-      "xpag_pix_copy_paste": "",
-      "xpag_qr_code_url": "",
-      "xpag_clabe": "CLABE-SIMULADA",
-      "xpag_bank": "Banco de exemplo",
-      "xpag_beneficiary": "Cliente de exemplo",
-      "xpag_reference": "",
-      "xpag_oxxo_reference": "",
-      "xpag_oxxo_barcode": "",
-      "xpag_checkout_url": "",
-      "xpag_deposit_address": "",
-      "xpag_transfer_type": "",
-      "xpag_expire_minutes": "",
-      "xpag_expires_at": "",
-      "xpag_paid_at": "",
-      "xpag_e2e": "",
-      "xpag_account_id": "acc_meta_primary",
-      "xpag_error": "",
-      "xpag_error_code": "",
-      "xpag_raw_response": "{\"clabe\":\"CLABE-SIMULADA\",\"bank_name\":\"Banco de exemplo\",\"beneficiary\":\"Cliente de exemplo\"}"
+      "dia_semana": "segunda-feira",
+      "timestamp": "2026-10-12T20:15:32.468Z"
     },
     "history": [
       {
-        "id": "msg_1791763962753_zsy3w",
+        "id": "msg_1791821515866_m7fbl",
         "sender": "bot",
         "type": "text",
         "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "12:12 AM"
+        "timestamp": "04:11 PM"
       },
       {
-        "id": "xpag_sim_1791763962755",
+        "id": "durable_wait_1791821531244",
         "sender": "system",
         "type": "info",
-        "content": "🧪 Variáveis simuladas para uma cobrança SPEI de 70 MXN. Nenhuma transação real foi criada.",
-        "timestamp": "12:12 AM"
+        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
+        "timestamp": "04:12 PM"
       },
       {
-        "id": "msg_1791763962755_bv4si",
+        "id": "msg_1791821531244_f1bew",
         "sender": "bot",
         "type": "text",
-        "content": "Obrigado pelo pagamento!!",
-        "timestamp": "12:12 AM"
+        "content": "Timeout",
+        "timestamp": "04:12 PM"
+      },
+      {
+        "id": "msg_1791821531245_4fbfq",
+        "sender": "bot",
+        "type": "text",
+        "content": "Continuando",
+        "timestamp": "04:12 PM"
+      },
+      {
+        "id": "flow_completed_1791821531245",
+        "sender": "system",
+        "type": "info",
+        "content": "Funil finalizado. Novas mensagens não reiniciarão esta execução automaticamente.",
+        "timestamp": "04:12 PM"
       }
     ],
     "isWindowOpen": true,
     "windowType": "24h_standard",
-    "windowExpiresAt": "2026-10-13T00:12:42.750Z",
+    "windowExpiresAt": "2026-10-13T16:11:55.864Z",
     "botPaused": false,
     "flowCompleted": true,
     "autoDeleteDays": 7,
-    "createdAt": "2026-10-12T00:12:42.750Z",
-    "updatedAt": "2026-10-12T00:12:42.755Z",
-    "executionCheckpointVersion": 1
+    "createdAt": "2026-10-12T16:11:55.864Z",
+    "updatedAt": "2026-10-12T16:12:11.245Z",
+    "executionCheckpointVersion": 1,
+    "waitingVariableName": null,
+    "waitingUntil": null,
+    "waitingNodeId": null,
+    "waitingKind": null,
+    "waitingIsLiveWhatsApp": null,
+    "waitingForPayment": false,
+    "waitingPaymentExternalId": null,
+    "waitingPaymentNodeId": null
   },
   "acc_1791749126850_4h93::simulator_user": {
     "phoneNumber": "simulator_user",
@@ -194,16 +187,16 @@
       "telefone": "+55 11 99999-0000",
       "phone": "+55 11 99999-0000",
       "numero_whatsapp": "+55 11 99999-0000",
-      "data": "11/10/2026",
-      "data_atual": "11/10/2026",
-      "hora": "22:14:39",
-      "hora_atual": "22:14:39",
-      "data_hora": "11/10/2026 22:14:39",
-      "dia": "11",
+      "data": "12/10/2026",
+      "data_atual": "12/10/2026",
+      "hora": "16:15:32",
+      "hora_atual": "16:15:32",
+      "data_hora": "12/10/2026 16:15:32",
+      "dia": "12",
       "mes": "10",
       "ano": "2026",
-      "dia_semana": "domingo",
-      "timestamp": "2026-10-12T02:14:39.340Z"
+      "dia_semana": "segunda-feira",
+      "timestamp": "2026-10-12T20:15:32.469Z"
     },
     "history": [],
     "lastCustomerMessageAt": "2026-10-11T20:57:24.671Z",
@@ -230,16 +223,16 @@
       "telefone": "556993161840",
       "phone": "556993161840",
       "numero_whatsapp": "556993161840",
-      "data": "11/10/2026",
-      "data_atual": "11/10/2026",
-      "hora": "22:14:39",
-      "hora_atual": "22:14:39",
-      "data_hora": "11/10/2026 22:14:39",
-      "dia": "11",
+      "data": "12/10/2026",
+      "data_atual": "12/10/2026",
+      "hora": "16:15:32",
+      "hora_atual": "16:15:32",
+      "data_hora": "12/10/2026 16:15:32",
+      "dia": "12",
       "mes": "10",
       "ano": "2026",
-      "dia_semana": "domingo",
-      "timestamp": "2026-10-12T02:14:39.340Z"
+      "dia_semana": "segunda-feira",
+      "timestamp": "2026-10-12T20:15:32.469Z"
     },
     "history": [
       {
@@ -282,217 +275,49 @@
       "telefone": "556993161840",
       "phone": "556993161840",
       "numero_whatsapp": "556993161840",
-      "data": "11/10/2026",
-      "data_atual": "11/10/2026",
-      "hora": "22:14:39",
-      "hora_atual": "22:14:39",
-      "data_hora": "11/10/2026 22:14:39",
-      "dia": "11",
+      "data": "12/10/2026",
+      "data_atual": "12/10/2026",
+      "hora": "16:15:32",
+      "hora_atual": "16:15:32",
+      "data_hora": "12/10/2026 16:15:32",
+      "dia": "12",
       "mes": "10",
       "ano": "2026",
-      "dia_semana": "domingo",
-      "timestamp": "2026-10-12T02:14:39.340Z"
+      "dia_semana": "segunda-feira",
+      "timestamp": "2026-10-12T20:15:32.469Z"
     },
     "history": [
       {
-        "id": "msg_1791765049191_jn0mk",
-        "sender": "user",
+        "id": "wamid.HBgMNTU2OTkzMTYxODQwFQIAERgSNDAxRTExQTIxNjVGMDc1QTcyAA==",
+        "sender": "agent",
         "type": "text",
         "content": "oi",
-        "timestamp": "12:30 AM"
-      },
-      {
-        "id": "msg_1791765049194_d5cc6",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "12:30 AM"
-      },
-      {
-        "id": "durable_wait_1791765065836",
-        "sender": "system",
-        "type": "info",
-        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765065837_za785",
-        "sender": "bot",
-        "type": "text",
-        "content": "Timeout",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765066065_2snpu",
-        "sender": "user",
-        "type": "text",
-        "content": "ko",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765066065_csy66",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "durable_wait_1791765081841",
-        "sender": "system",
-        "type": "info",
-        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765081842_i90n9",
-        "sender": "bot",
-        "type": "text",
-        "content": "Timeout",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765084135_yg0x8",
-        "sender": "user",
-        "type": "text",
-        "content": "ok",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765084136_9jiv6",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765089237_0l091",
-        "sender": "user",
-        "type": "text",
-        "content": "ok",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765089238_ff0yy",
-        "sender": "bot",
-        "type": "text",
-        "content": "Funil Passou",
-        "timestamp": "12:31 AM"
-      },
-      {
-        "id": "msg_1791765125319_dnrou",
-        "sender": "user",
-        "type": "text",
-        "content": ".",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765125320_cse9l",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "durable_wait_1791765140857",
-        "sender": "system",
-        "type": "info",
-        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765140857_ll7lm",
-        "sender": "bot",
-        "type": "text",
-        "content": "Timeout",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765141316_50e5v",
-        "sender": "bot",
-        "type": "text",
-        "content": "Continuando",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765158225_jxlis",
-        "sender": "user",
-        "type": "text",
-        "content": "oi",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765158226_istz2",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765166471_qjdud",
-        "sender": "user",
-        "type": "text",
-        "content": "pio",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765166471_itel9",
-        "sender": "bot",
-        "type": "text",
-        "content": "Funil Passou",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765174837_dnrii",
-        "sender": "user",
-        "type": "text",
-        "content": "ok",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "msg_1791765174837_7999g",
-        "sender": "bot",
-        "type": "text",
-        "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "12:32 AM"
-      },
-      {
-        "id": "durable_wait_1791765190865",
-        "sender": "system",
-        "type": "info",
-        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
-        "timestamp": "12:33 AM"
-      },
-      {
-        "id": "msg_1791765190866_va4uj",
-        "sender": "bot",
-        "type": "text",
-        "content": "Timeout",
-        "timestamp": "12:33 AM"
-      },
-      {
-        "id": "msg_1791765191445_1uow1",
-        "sender": "bot",
-        "type": "text",
-        "content": "Continuando",
-        "timestamp": "12:33 AM"
+        "mediaUrl": "",
+        "filename": "",
+        "caption": "",
+        "timestamp": "04:02 PM",
+        "status": "delivered"
       }
     ],
-    "lastCustomerMessageAt": "2026-10-12T00:32:54.837Z",
-    "windowExpiresAt": "2026-10-13T00:32:54.837Z",
+    "lastCustomerMessageAt": "2026-10-12T02:19:38.121Z",
+    "windowExpiresAt": "2026-10-13T02:19:38.121Z",
     "windowType": "24h_standard",
     "isWindowOpen": true,
-    "botPaused": false,
+    "botPaused": true,
     "flowCompleted": true,
     "autoDeleteDays": 7,
     "autoDeleteAt": "2026-10-19T00:30:49.189Z",
     "createdAt": "2026-10-12T00:30:49.189Z",
-    "updatedAt": "2026-10-12T00:33:11.895Z",
+    "updatedAt": "2026-10-12T16:02:54.791Z",
     "name": "V",
     "waitingUntil": null,
     "waitingNodeId": null,
     "waitingKind": null,
     "waitingIsLiveWhatsApp": null,
     "executionCheckpointVersion": 1,
-    "waitingVariableName": null
+    "waitingVariableName": null,
+    "waitingForPayment": false,
+    "waitingPaymentExternalId": null,
+    "waitingPaymentNodeId": null
   }
 }

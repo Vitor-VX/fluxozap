@@ -91,15 +91,15 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
           // Before payment branches existed, the only edge meant “continue after payment”.
           // Preserve that behavior and anchor it visually to the new Paga handle.
           if (nodeTypeById.get(edge.source) === 'xpag_payment' && !edge.sourceHandle) {
-            return { ...edge, sourceHandle: 'paid' };
+            return { ...edge, sourceHandle: 'paid', interactionWidth: edge.interactionWidth || 32 };
           }
           if (nodeTypeById.get(edge.source) === 'wait_reply' && !edge.sourceHandle) {
-            return { ...edge, sourceHandle: 'answered' };
+            return { ...edge, sourceHandle: 'answered', interactionWidth: edge.interactionWidth || 32 };
           }
           if (nodeTypeById.get(edge.source) === 'delay' && !edge.sourceHandle) {
-            return { ...edge, sourceHandle: 'completed' };
+            return { ...edge, sourceHandle: 'completed', interactionWidth: edge.interactionWidth || 32 };
           }
-          return edge;
+          return { ...edge, interactionWidth: edge.interactionWidth || 32 };
         });
         setEdges(loadedEdges);
       } else {
@@ -136,6 +136,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
           {
             ...connection,
             animated: true,
+            interactionWidth: 32,
             style: { stroke: '#10b981', strokeWidth: 2.5 },
           },
           eds
@@ -154,6 +155,23 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
 
   const onPaneClick = useCallback(() => {
     setSelectedNode(null);
+  }, []);
+
+  const onEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setEdges((currentEdges) => currentEdges.filter((item) => item.id !== edge.id));
+  }, []);
+
+  const onCanvasContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const edgeElement = target.closest('.react-flow__edge');
+    const edgeId = edgeElement?.getAttribute('data-id');
+    if (!edgeId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setEdges((currentEdges) => currentEdges.filter((item) => item.id !== edgeId));
   }, []);
 
   // Add new node of specified type
@@ -221,6 +239,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
         label: 'Gerar Pagamento',
         type,
         xpagMethod: 'PIX',
+        xpagSpeiMode: 'dynamic',
         xpagAmount: '50.00',
         xpagPayerName: '',
         xpagPayerEmail: '',
@@ -336,7 +355,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
       <NodeSidebar onAddNode={handleAddNode} />
 
       {/* Main React Flow Canvas */}
-      <div className="flex-1 h-full relative">
+      <div className="flex-1 h-full relative" onContextMenu={onCanvasContextMenu}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -345,6 +364,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={onNodeClick}
+          onEdgeContextMenu={onEdgeContextMenu}
           onPaneClick={onPaneClick}
           fitView
           className="bg-slate-50/80"

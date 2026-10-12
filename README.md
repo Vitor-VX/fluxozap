@@ -91,10 +91,12 @@ Copie a URL HTTPS gerada (ex: `https://xyz.ngrok-free.app/api/webhook`) e cole n
 1. Abra **Pagamentos XPag** e informe o `Client ID` e o `Client Secret` gerados em **Integrações → API** no painel da XPag.
 2. Acesse o FluxoZap por uma URL HTTPS pública. Cada cobrança recebe uma URL de webhook exclusiva, vinculada à sessão e ao telefone do pagador.
 3. No editor, adicione o bloco **Gerar Pagamento** e escolha **PIX**, **SPEI** ou **OXXO**.
-4. Configure o valor em BRL para PIX ou MXN para SPEI/OXXO. Nome, documento, e-mail e descrição são opcionais.
+4. Para SPEI, escolha **CLABE dinâmica** (valor definido por você, validade de 24 horas e um pagamento) ou **CLABE de valor aberto** (sem `amount`, o pagador escolhe o valor, sem validade e reutilizável). OXXO continua exigindo valor exato entre 10 e 10.000 MXN. Nome, documento, e-mail e descrição são opcionais.
 5. Conecte a saída **Gerada** aos blocos que enviam as instruções e use as variáveis produzidas pelo pagamento. As saídas **Paga**, **Erro** e **Expirada** tratam cada resultado separadamente.
 
 O bloco não envia mais uma mensagem automática grande. Ele salva os dados sob um prefixo configurável (por padrão, `xpag`), incluindo `{{xpag_pix_copy_paste}}`, `{{xpag_qr_code_url}}`, `{{xpag_clabe}}`, `{{xpag_bank}}`, `{{xpag_beneficiary}}`, `{{xpag_oxxo_reference}}`, `{{xpag_oxxo_barcode}}`, `{{xpag_status}}`, `{{xpag_expires_at}}`, `{{xpag_error}}` e os identificadores da transação. Para enviar a imagem do QR Code, use `{{xpag_qr_code_url}}` como URL de um bloco **Enviar Imagem**.
+
+No editor, clicar com o botão direito diretamente sobre uma conexão remove somente aquela linha. A área interativa da conexão é maior que o traço visível para facilitar o clique.
 
 O funil pode aguardar a confirmação do pagamento sem impedir que a saída **Gerada** envie primeiro as instruções personalizadas. Antes de liberar a saída **Paga**, o FluxoZap identifica a cobrança pela chave única e reconcilia o callback pela rota autenticada de consulta da XPag. A expiração usa a data devolvida pela API ou, se configurado, um prazo local de segurança. O simulador nunca cria cobranças reais.
 

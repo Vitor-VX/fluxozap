@@ -595,21 +595,62 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               </select>
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Valor em {data.xpagMethod === 'PIX' || !data.xpagMethod ? 'BRL' : 'MXN'}
-              </label>
-              <input
-                type="text"
-                value={data.xpagAmount || ''}
-                onChange={(e) => onUpdateData(selectedNode.id, { xpagAmount: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500"
-                placeholder={data.xpagMethod === 'PIX' || !data.xpagMethod ? '50.00 ou {{valor_brl}}' : '500.00 ou {{valor_mxn}}'}
-              />
-              {data.xpagMethod === 'OXXO' && (
-                <p className="text-[10px] text-amber-700 mt-1">OXXO aceita de 10 a 10.000 MXN e exige o valor exato.</p>
-              )}
-            </div>
+            {data.xpagMethod === 'SPEI' && (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1.5">Modalidade da CLABE</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateData(selectedNode.id, { xpagSpeiMode: 'dynamic' })}
+                    className={`rounded-xl border p-2.5 text-left transition-colors cursor-pointer ${
+                      (data.xpagSpeiMode || 'dynamic') === 'dynamic'
+                        ? 'border-violet-400 bg-violet-50 text-violet-900'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <strong className="block text-[11px]">Dinâmica</strong>
+                    <span className="mt-0.5 block text-[9px] leading-snug">Você define o valor · 24 horas · um pagamento</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateData(selectedNode.id, { xpagSpeiMode: 'open', xpagAmount: '' })}
+                    className={`rounded-xl border p-2.5 text-left transition-colors cursor-pointer ${
+                      data.xpagSpeiMode === 'open'
+                        ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <strong className="block text-[11px]">Valor aberto</strong>
+                    <span className="mt-0.5 block text-[9px] leading-snug">Pagador define o valor · sem validade · reutilizável</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {data.xpagMethod === 'SPEI' && data.xpagSpeiMode === 'open' ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[10px] leading-relaxed text-emerald-900">
+                Nenhum valor será enviado à XPag. Será criada uma CLABE exclusiva para esta venda, vinculada ao ID e webhook do contato. O pagador escolhe quanto transferir.
+              </div>
+            ) : (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Valor em {data.xpagMethod === 'PIX' || !data.xpagMethod ? 'BRL' : 'MXN'}
+                </label>
+                <input
+                  type="text"
+                  value={data.xpagAmount || ''}
+                  onChange={(e) => onUpdateData(selectedNode.id, { xpagAmount: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500"
+                  placeholder={data.xpagMethod === 'PIX' || !data.xpagMethod ? '50.00 ou {{valor_brl}}' : '500.00 ou {{valor_mxn}}'}
+                />
+                {data.xpagMethod === 'SPEI' && (
+                  <p className="text-[10px] text-violet-700 mt-1">A CLABE dinâmica aceita o valor exato e expira em 24 horas.</p>
+                )}
+                {data.xpagMethod === 'OXXO' && (
+                  <p className="text-[10px] text-amber-700 mt-1">OXXO aceita de 10 a 10.000 MXN e exige o valor exato.</p>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Nome do pagador (opcional)</label>
@@ -690,7 +731,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               <p className="font-semibold text-slate-800 mb-2">Variáveis geradas</p>
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  'status', 'amount', 'currency', 'method', 'provider', 'fee', 'external_id', 'transaction_id', 'request_number',
+                  'status', 'amount', 'currency', 'method', 'charge_mode', 'open_value', 'provider', 'fee', 'external_id', 'transaction_id', 'request_number',
                   ...(data.xpagMethod === 'PIX' || !data.xpagMethod ? ['pix_copy_paste', 'qr_code_url'] : []),
                   ...(data.xpagMethod === 'SPEI' ? ['clabe', 'bank', 'beneficiary', 'reference'] : []),
                   ...(data.xpagMethod === 'OXXO' ? ['oxxo_reference', 'oxxo_barcode', 'reference'] : []),
@@ -716,7 +757,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               </p>
             </div>
 
-            <div>
+            {!(data.xpagMethod === 'SPEI' && data.xpagSpeiMode === 'open') && <div>
               <label className="block font-semibold text-slate-700 mb-1">Expiração local de segurança (minutos, opcional)</label>
               <input
                 type="number"
@@ -731,7 +772,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
               <p className="text-[10px] text-slate-500 mt-1.5">
                 Se a API não retornar uma data de vencimento, este prazo aciona a saída <strong>Expirada</strong>.
               </p>
-            </div>
+            </div>}
 
             <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
               <input

@@ -110,6 +110,7 @@ export interface FlowNodeData {
 
   // XPag Global payment block (Brazil and Mexico)
   xpagMethod?: 'PIX' | 'SPEI' | 'OXXO';
+  xpagSpeiMode?: 'dynamic' | 'open';
   xpagAmount?: string;
   xpagPayerName?: string;
   xpagPayerEmail?: string;

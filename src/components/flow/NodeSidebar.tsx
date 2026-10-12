@@ -5,7 +5,6 @@ import {
   MessageCircleQuestion,
   Clock,
   GitBranch,
-  Play,
   Plus,
   Mic,
   Video,
@@ -142,16 +141,6 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
         })}
       </div>
 
-      <div className="p-3.5 bg-slate-50 border-t border-slate-200 text-xs text-slate-600">
-        <p className="font-semibold text-slate-800 flex items-center gap-1.5 mb-1">
-          <Play className="w-3 h-3 text-emerald-600 fill-current" />
-          Dica do Fluxo
-        </p>
-        <p className="text-[11px] leading-relaxed text-slate-500">
-          Ligue a saída verde de um bloco à entrada do próximo para criar a sequência de mensagens. Use{' '}
-          <strong className="text-teal-700 font-semibold">Aguardar Resposta</strong> para capturar respostas dos usuários.
-        </p>
-      </div>
     </div>
   );
 };

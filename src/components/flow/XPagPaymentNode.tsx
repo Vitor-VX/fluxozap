@@ -5,6 +5,7 @@ import { BadgeDollarSign } from 'lucide-react';
 export const XPagPaymentNode = ({ data, selected }: { data: any; selected?: boolean }) => {
   const method = ['PIX', 'SPEI', 'OXXO'].includes(data.xpagMethod) ? data.xpagMethod : 'PIX';
   const currency = method === 'PIX' ? 'BRL' : 'MXN';
+  const isOpenSpei = method === 'SPEI' && data.xpagSpeiMode === 'open';
   return (
     <div className={`relative min-w-[310px] max-w-[350px] bg-white rounded-2xl shadow-sm border transition-all ${
       selected ? 'border-violet-600 ring-2 ring-violet-500/20 shadow-md' : 'border-slate-200 hover:border-slate-300'
@@ -22,7 +23,14 @@ export const XPagPaymentNode = ({ data, selected }: { data: any; selected?: bool
       <div className="p-3 space-y-2">
         <p className="text-[11px] font-medium text-slate-500">{data.label || 'Gerar Pagamento'}</p>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-          <p className="text-sm font-bold text-slate-900">{data.xpagAmount || '0.00'} {currency}</p>
+          <p className="text-sm font-bold text-slate-900">
+            {isOpenSpei ? 'Valor aberto' : `${data.xpagAmount || '0.00'} ${currency}`}
+          </p>
+          {method === 'SPEI' && (
+            <p className="mt-0.5 text-[9px] font-semibold text-violet-700">
+              {isOpenSpei ? 'CLABE sem validade · pagador define o valor' : 'CLABE dinâmica · validade de 24 horas'}
+            </p>
+          )}
           <p className="text-[10px] text-slate-500 mt-1">
             Salva em <span className="font-mono">{`{{${data.xpagVariablePrefix || 'xpag'}_*}}`}</span>
           </p>

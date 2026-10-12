@@ -443,6 +443,8 @@ interface XPagPaymentRecord {
   method: XPagPaymentMethod;
   amount: number;
   currency: XPagCurrency;
+  chargeMode?: 'dynamic' | 'open';
+  receivedE2es?: string[];
   status: string;
   sessionPhoneNumber: string;
   nodeId: string;
@@ -886,9 +888,11 @@ function buildXPagVariables(record: XPagPaymentRecord, response: any = record.re
   return {
     status: firstXPagValue(record.status, data.status),
     payment_status: firstXPagValue(record.status, data.status),
-    amount: String(record.amount),
+    amount: record.amount > 0 ? String(record.amount) : firstXPagValue(data.amount),
     currency: record.currency,
     method: record.method,
+    charge_mode: record.chargeMode || 'dynamic',
+    open_value: record.chargeMode === 'open' ? 'true' : 'false',
     provider: firstXPagValue(data.provider),
     fee: firstXPagValue(data.fee),
     external_id: record.externalId,
@@ -945,8 +949,11 @@ async function createXPagCharge(
     ? node.data.xpagMethod
     : 'PIX';
   const currency: XPagCurrency = method === 'PIX' ? 'BRL' : 'MXN';
+  const chargeMode: 'dynamic' | 'open' = method === 'SPEI' && node.data.xpagSpeiMode === 'open'
+    ? 'open'
+    : 'dynamic';
   const amountText = replaceVariables(node.data.xpagAmount || '', session.variables);
-  const amount = parsePaymentAmount(amountText);
+  const amount = chargeMode === 'open' ? 0 : parsePaymentAmount(amountText);
   if (method === 'OXXO' && (amount < 10 || amount > 10000)) {
     throw new Error('OXXO aceita cobranças entre 10 e 10.000 MXN.');
   }
@@ -969,10 +976,10 @@ async function createXPagCharge(
     .trim();
 
   const payload: any = {
-    amount,
     external_id: externalId,
     webhook_url: webhookUrl,
   };
+  if (chargeMode === 'dynamic') payload.amount = amount;
   if (method === 'PIX') {
     if (payerName) payload.name = payerName;
     if (payerEmail) payload.email = payerEmail;
@@ -1000,6 +1007,8 @@ async function createXPagCharge(
     method,
     amount,
     currency,
+    chargeMode,
+    receivedE2es: [],
     status: 'creating',
     sessionPhoneNumber: session.phoneNumber,
     nodeId: node.id,
@@ -1035,7 +1044,9 @@ async function createXPagCharge(
       chargeData?.payee_data?.expires_at, chargeData?.payee_data?.expiration_date
     ));
     const apiExpirationMinutes = Number(chargeData?.expire_minutes || chargeData?.expireMinutes || 0);
-    const localExpirationMinutes = Number(node.data.xpagExpirationMinutes || 0);
+    const localExpirationMinutes = chargeMode === 'open'
+      ? 0
+      : Number(node.data.xpagExpirationMinutes || (method === 'SPEI' ? 24 * 60 : 0));
     const expirationMinutes = apiExpirationMinutes > 0 ? apiExpirationMinutes : localExpirationMinutes;
     record.expiresAt = apiExpiresAt || (expirationMinutes > 0
       ? new Date(Date.now() + expirationMinutes * 60 * 1000).toISOString()
@@ -1588,16 +1599,23 @@ async function runFlowStep(
       );
 
       if (!isLiveWhatsApp) {
-        const simulatedAmount = replaceVariables(currentNode.data.xpagAmount || (method === 'PIX' ? '50' : '500'), session.variables);
+        const isOpenSpei = method === 'SPEI' && currentNode.data.xpagSpeiMode === 'open';
+        const simulatedAmount = isOpenSpei
+          ? '0'
+          : replaceVariables(currentNode.data.xpagAmount || (method === 'PIX' ? '50' : '500'), session.variables);
         const simulatedRecord: XPagPaymentRecord = {
           externalId: 'XPAG-SIMULACAO', method, amount: Number(simulatedAmount) || 0, currency,
+          chargeMode: isOpenSpei ? 'open' : 'dynamic', receivedE2es: [],
           status: 'simulated', sessionPhoneNumber: session.phoneNumber, nodeId: currentNode.id,
           accountId: session.accountId, isLiveWhatsApp: false, webhookKeyHash: '',
           payer: { name: session.name || session.phoneNumber, phoneNumber: session.phoneNumber },
           response: method === 'PIX'
             ? { copy_paste: 'PIX-SIMULADO', qr_url: 'https://exemplo.invalid/qr-code.png' }
             : method === 'SPEI'
-              ? { clabe: 'CLABE-SIMULADA', bank_name: 'Banco de exemplo', beneficiary: 'Cliente de exemplo' }
+              ? {
+                  clabe: 'CLABE-SIMULADA', bank_name: 'Banco de exemplo', beneficiary: 'Cliente de exemplo',
+                  ...(isOpenSpei ? { static: true, open_value: true } : { amount: Number(simulatedAmount) || 0 }),
+                }
               : { payee_data: { reference: 'OXXO-SIMULADO', barcode: 'https://exemplo.invalid/codigo-barras.png' } },
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         };
@@ -1606,7 +1624,9 @@ async function runFlowStep(
           id: `xpag_sim_${Date.now()}`,
           sender: 'system',
           type: 'info',
-          content: `🧪 Variáveis simuladas para uma cobrança ${method} de ${simulatedAmount} ${currency}. Nenhuma transação real foi criada.`,
+          content: isOpenSpei
+            ? '🧪 Variáveis simuladas para uma CLABE SPEI de valor aberto. Nenhuma transação real foi criada.'
+            : `🧪 Variáveis simuladas para uma cobrança ${method} de ${simulatedAmount} ${currency}. Nenhuma transação real foi criada.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         });
         const simulationEdge = generatedEdge || edges.find(
@@ -1652,6 +1672,7 @@ async function runFlowStep(
         } catch (err: any) {
           const failedRecord: XPagPaymentRecord = err.paymentRecord || {
             externalId: '', method, amount: 0, currency, status: 'failed',
+            chargeMode: method === 'SPEI' && currentNode.data.xpagSpeiMode === 'open' ? 'open' : 'dynamic',
             sessionPhoneNumber: session.phoneNumber, nodeId: currentNode.id,
             accountId: session.accountId, isLiveWhatsApp: true, webhookKeyHash: '',
             payer: { name: session.name || session.phoneNumber, phoneNumber: session.phoneNumber },
@@ -2674,15 +2695,41 @@ async function startServer() {
       }
 
       // XPag does not sign callback bodies. Confirm the real transaction through
-      // the authenticated API before releasing the funnel.
-      const referenceName = record.transactionId ? 'transaction_id' : 'request_number';
-      const referenceValue = record.transactionId || record.requestNumber;
-      if (!referenceValue) throw new Error('Pagamento XPag sem identificador consultável.');
-      const verification = await xpagRequest(
-        `/consult-transaction?${referenceName}=${encodeURIComponent(referenceValue)}`,
-        { method: 'GET' }
-      );
-      const verificationData = verification?.data || verification?.payment || verification;
+      // the authenticated API before releasing the funnel. Open-value CLABEs
+      // return a list because the same key can receive multiple payments.
+      let verification: any;
+      let verificationData: any;
+      if (record.chargeMode === 'open') {
+        verification = await xpagRequest(
+          `/consult-transaction?external_id=${encodeURIComponent(record.externalId)}&limit=100`,
+          { method: 'GET' }
+        );
+        const verificationRoot = verification?.data || verification?.payment || verification;
+        const payments = Array.isArray(verificationRoot?.payments) ? verificationRoot.payments : [];
+        const eventE2e = firstXPagValue(eventData.e2e);
+        const eventTransactionId = firstXPagValue(eventData.transaction_id, eventData.transactionId);
+        verificationData = payments.find((payment: any) =>
+          (eventE2e && firstXPagValue(payment.e2e) === eventE2e) ||
+          (eventTransactionId && firstXPagValue(payment.transaction_id, payment.transactionId, payment.id) === eventTransactionId)
+        );
+        if (!verificationData) {
+          console.warn('[XPag Webhook] Pagamento de CLABE aberta não localizado na consulta autenticada.', {
+            externalId: record.externalId,
+            eventE2e,
+            eventTransactionId,
+          });
+          return;
+        }
+      } else {
+        const referenceName = record.transactionId ? 'transaction_id' : 'request_number';
+        const referenceValue = record.transactionId || record.requestNumber;
+        if (!referenceValue) throw new Error('Pagamento XPag sem identificador consultável.');
+        verification = await xpagRequest(
+          `/consult-transaction?${referenceName}=${encodeURIComponent(referenceValue)}`,
+          { method: 'GET' }
+        );
+        verificationData = verification?.data || verification?.payment || verification;
+      }
       const verifiedStatus = String(verificationData.status || '').toLowerCase();
       const verifiedAmount = Number(verificationData.amount);
       const verifiedCurrency = String(verificationData.currency || record.currency).toUpperCase();
@@ -2690,7 +2737,8 @@ async function startServer() {
         verifiedStatus !== 'confirmed' ||
         verifiedCurrency !== record.currency ||
         !Number.isFinite(verifiedAmount) ||
-        Math.abs(verifiedAmount - record.amount) > 0.009
+        verifiedAmount <= 0 ||
+        (record.chargeMode !== 'open' && Math.abs(verifiedAmount - record.amount) > 0.009)
       ) {
         console.warn('[XPag Webhook] Evento não liberado após consulta autenticada.', {
           externalId: record.externalId,
@@ -2701,9 +2749,14 @@ async function startServer() {
         return;
       }
 
-      if (record.status === 'confirmed') return;
+      const verifiedE2e = firstXPagValue(verificationData.e2e, eventData.e2e);
+      record.receivedE2es ||= [];
+      if (verifiedE2e && record.receivedE2es.includes(verifiedE2e)) return;
+      if (record.chargeMode !== 'open' && record.status === 'confirmed') return;
       record.status = 'confirmed';
-      record.e2e = verificationData.e2e || eventData.e2e || record.e2e;
+      record.amount = verifiedAmount;
+      record.e2e = verifiedE2e || record.e2e;
+      if (verifiedE2e) record.receivedE2es.push(verifiedE2e);
       record.paidAt = normalizeXPagDate(firstXPagValue(verificationData.paid_at, verificationData.confirmed_at)) || new Date().toISOString();
       record.response = { ...record.response, verification, webhook: event };
       record.updatedAt = new Date().toISOString();
