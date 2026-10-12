@@ -951,6 +951,16 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
             </div>
           </div>
         )}
+
+        {selectedNode.type === 'end' && (
+          <div className="flex gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-900">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+            <p className="text-[11px] leading-relaxed">
+              Ao chegar aqui, a sessão fica concluída. Outras mensagens do contato são registradas,
+              mas não disparam o funil novamente. O reinício continua disponível manualmente na conversa.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Footer Actions */}

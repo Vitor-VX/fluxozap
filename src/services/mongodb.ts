@@ -24,6 +24,7 @@ export interface ProjectSnapshot {
   r2Config?: any;
   xpagConfig?: any;
   flow?: any;
+  flows?: any[];
   sessions?: any[];
   accounts?: any[];
   logs?: any[];
@@ -200,9 +201,8 @@ class MongoService {
         xpag: initialData.xpagConfig || {},
       });
     }
-    if (initialData.flow && !(await FlowModel.exists({ flowId: initialData.flow.id || 'default' }))) {
-      await this.saveFlow(initialData.flow);
-    }
+    // Flows are intentionally never seeded from local JSON. MongoDB is their
+    // single source of truth; an absent document means an empty funnel.
     if ((await SessionModel.countDocuments()) === 0 && initialData.sessions?.length) {
       await Promise.all(initialData.sessions.map((session) => this.saveSession(session)));
     }
@@ -219,9 +219,9 @@ class MongoService {
 
   public async getProjectSnapshot(): Promise<ProjectSnapshot | null> {
     if (!this.isConnected()) return null;
-    const [project, flow, sessions, accounts, logs, payments] = await Promise.all([
+    const [project, flows, sessions, accounts, logs, payments] = await Promise.all([
       ProjectConfig.findOne({ identifier: 'default' }).lean(),
-      FlowModel.findOne().sort({ updatedAt: -1 }).lean(),
+      FlowModel.find().sort({ updatedAt: -1 }).lean(),
       SessionModel.find().lean(),
       WhatsAppAccountModel.find().lean(),
       ApiLogModel.find().sort({ timestamp: -1 }).limit(200).lean(),
@@ -231,7 +231,8 @@ class MongoService {
       config: (project as any)?.meta || {},
       r2Config: (project as any)?.r2 || {},
       xpagConfig: (project as any)?.xpag || {},
-      flow: (flow as any)?.data,
+      flow: (flows[0] as any)?.data,
+      flows: flows.map((item: any) => item.data),
       sessions: sessions.map((item: any) => item.data),
       accounts: accounts.map((item: any) => item.data),
       logs: logs.map((item: any) => item.data),
@@ -243,6 +244,18 @@ class MongoService {
     if (!this.isConnected()) return false;
     const data = { ...flowData, updatedAt: new Date().toISOString() };
     await FlowModel.updateOne({ flowId: data.id || 'default' }, { $set: { data } }, { upsert: true });
+    return true;
+  }
+
+  public async getFlow(flowId: string): Promise<any | null> {
+    if (!this.isConnected()) return null;
+    const flow = await FlowModel.findOne({ flowId }).lean();
+    return (flow as any)?.data || null;
+  }
+
+  public async deleteFlow(flowId: string): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    await FlowModel.deleteOne({ flowId });
     return true;
   }
 
@@ -283,14 +296,15 @@ class MongoService {
   public async saveAccounts(accounts: any[]): Promise<boolean> {
     if (!this.isConnected()) return false;
     const validAccounts = (accounts || []).filter((item) => item?.id);
-    await Promise.all(validAccounts.map((data) =>
-      WhatsAppAccountModel.updateOne(
+    await Promise.all(validAccounts.map((account) => {
+      const data = { ...account };
+      delete data.flow;
+      return WhatsAppAccountModel.updateOne(
         { accountId: data.id },
         { $set: { phoneNumberId: data.phoneNumberId, data } },
         { upsert: true }
-      )
-    ));
-    await Promise.all(validAccounts.filter((item) => item.flow).map((item) => this.saveFlow(item.flow)));
+      );
+    }));
     if (validAccounts.length) {
       await WhatsAppAccountModel.deleteMany({ accountId: { $nin: validAccounts.map((item) => item.id) } });
     } else {

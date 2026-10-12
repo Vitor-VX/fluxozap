@@ -13,14 +13,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "11/10/2026",
       "data_atual": "11/10/2026",
-      "hora": "18:41:10",
-      "hora_atual": "18:41:10",
-      "data_hora": "11/10/2026 18:41:10",
+      "hora": "22:14:39",
+      "hora_atual": "22:14:39",
+      "data_hora": "11/10/2026 22:14:39",
       "dia": "11",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "domingo",
-      "timestamp": "2026-10-11T22:41:10.689Z"
+      "timestamp": "2026-10-12T02:14:39.336Z"
     },
     "history": [
       {
@@ -110,42 +110,76 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "11/10/2026",
       "data_atual": "11/10/2026",
-      "hora": "18:55:18",
-      "hora_atual": "18:55:18",
-      "data_hora": "11/10/2026 18:55:18",
+      "hora": "22:14:39",
+      "hora_atual": "22:14:39",
+      "data_hora": "11/10/2026 22:14:39",
       "dia": "11",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "domingo",
-      "timestamp": "2026-10-11T22:55:18.522Z",
-      "teste_resposta": "sim"
+      "timestamp": "2026-10-12T02:14:39.339Z",
+      "xpag_status": "simulated",
+      "xpag_payment_status": "simulated",
+      "xpag_amount": "70",
+      "xpag_currency": "MXN",
+      "xpag_method": "SPEI",
+      "xpag_provider": "",
+      "xpag_fee": "",
+      "xpag_external_id": "XPAG-SIMULACAO",
+      "xpag_transaction_id": "",
+      "xpag_request_number": "",
+      "xpag_pix_copy_paste": "",
+      "xpag_qr_code_url": "",
+      "xpag_clabe": "CLABE-SIMULADA",
+      "xpag_bank": "Banco de exemplo",
+      "xpag_beneficiary": "Cliente de exemplo",
+      "xpag_reference": "",
+      "xpag_oxxo_reference": "",
+      "xpag_oxxo_barcode": "",
+      "xpag_checkout_url": "",
+      "xpag_deposit_address": "",
+      "xpag_transfer_type": "",
+      "xpag_expire_minutes": "",
+      "xpag_expires_at": "",
+      "xpag_paid_at": "",
+      "xpag_e2e": "",
+      "xpag_account_id": "acc_meta_primary",
+      "xpag_error": "",
+      "xpag_error_code": "",
+      "xpag_raw_response": "{\"clabe\":\"CLABE-SIMULADA\",\"bank_name\":\"Banco de exemplo\",\"beneficiary\":\"Cliente de exemplo\"}"
     },
     "history": [
       {
-        "id": "msg_1791759316485_9lnf0",
-        "sender": "user",
-        "type": "text",
-        "content": "sim",
-        "timestamp": "18:55"
-      },
-      {
-        "id": "msg_1791759316485_qh18t",
+        "id": "msg_1791763962753_zsy3w",
         "sender": "bot",
         "type": "text",
-        "content": "RESPOSTA_RECEBIDA_OK",
-        "timestamp": "18:55"
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "12:12 AM"
+      },
+      {
+        "id": "xpag_sim_1791763962755",
+        "sender": "system",
+        "type": "info",
+        "content": "🧪 Variáveis simuladas para uma cobrança SPEI de 70 MXN. Nenhuma transação real foi criada.",
+        "timestamp": "12:12 AM"
+      },
+      {
+        "id": "msg_1791763962755_bv4si",
+        "sender": "bot",
+        "type": "text",
+        "content": "Obrigado pelo pagamento!!",
+        "timestamp": "12:12 AM"
       }
     ],
     "isWindowOpen": true,
     "windowType": "24h_standard",
-    "windowExpiresAt": "2026-10-12T22:55:16.485Z",
+    "windowExpiresAt": "2026-10-13T00:12:42.750Z",
     "botPaused": false,
     "flowCompleted": true,
     "autoDeleteDays": 7,
-    "createdAt": "2026-10-11T22:55:14.456Z",
-    "updatedAt": "2026-10-11T22:55:16.485Z",
-    "executionCheckpointVersion": 1,
-    "lastCustomerMessageAt": "2026-10-11T22:55:16.485Z"
+    "createdAt": "2026-10-12T00:12:42.750Z",
+    "updatedAt": "2026-10-12T00:12:42.755Z",
+    "executionCheckpointVersion": 1
   },
   "acc_1791749126850_4h93::simulator_user": {
     "phoneNumber": "simulator_user",
@@ -162,14 +196,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "11/10/2026",
       "data_atual": "11/10/2026",
-      "hora": "18:41:10",
-      "hora_atual": "18:41:10",
-      "data_hora": "11/10/2026 18:41:10",
+      "hora": "22:14:39",
+      "hora_atual": "22:14:39",
+      "data_hora": "11/10/2026 22:14:39",
       "dia": "11",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "domingo",
-      "timestamp": "2026-10-11T22:41:10.694Z"
+      "timestamp": "2026-10-12T02:14:39.340Z"
     },
     "history": [],
     "lastCustomerMessageAt": "2026-10-11T20:57:24.671Z",
@@ -198,14 +232,14 @@
       "numero_whatsapp": "556993161840",
       "data": "11/10/2026",
       "data_atual": "11/10/2026",
-      "hora": "18:41:10",
-      "hora_atual": "18:41:10",
-      "data_hora": "11/10/2026 18:41:10",
+      "hora": "22:14:39",
+      "hora_atual": "22:14:39",
+      "data_hora": "11/10/2026 22:14:39",
       "dia": "11",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "domingo",
-      "timestamp": "2026-10-11T22:41:10.694Z"
+      "timestamp": "2026-10-12T02:14:39.340Z"
     },
     "history": [
       {
@@ -250,201 +284,215 @@
       "numero_whatsapp": "556993161840",
       "data": "11/10/2026",
       "data_atual": "11/10/2026",
-      "hora": "19:23:47",
-      "hora_atual": "19:23:47",
-      "data_hora": "11/10/2026 19:23:47",
+      "hora": "22:14:39",
+      "hora_atual": "22:14:39",
+      "data_hora": "11/10/2026 22:14:39",
       "dia": "11",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "domingo",
-      "timestamp": "2026-10-11T23:23:47.990Z",
-      "xpag_external_id": "FZ-1791761027990-a99d0c52-586e10c9f3-1b622b3a",
-      "xpag_transaction_id": "pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c",
-      "xpag_payment_status": "pending",
-      "xpag_method": "OXXO",
-      "xpag_currency": "MXN",
-      "xpag_account_id": "acc_meta_primary",
-      "xpag_e2e": "",
-      "xpag_status": "pending",
-      "xpag_amount": "100",
-      "xpag_provider": "XPag",
-      "xpag_fee": "10",
-      "xpag_request_number": "pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c",
-      "xpag_pix_copy_paste": "8203650015594682",
-      "xpag_qr_code_url": "https://quickchart.io/qr?size=440&text=8203650015594682",
-      "xpag_clabe": "",
-      "xpag_bank": "",
-      "xpag_beneficiary": "",
-      "xpag_reference": "8203650015594682",
-      "xpag_oxxo_reference": "8203650015594682",
-      "xpag_oxxo_barcode": "https://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png",
-      "xpag_checkout_url": "",
-      "xpag_deposit_address": "",
-      "xpag_transfer_type": "REFERENCE",
-      "xpag_expire_minutes": "17280",
-      "xpag_expires_at": "2026-10-23T23:23:49.064Z",
-      "xpag_paid_at": "",
-      "xpag_error": "",
-      "xpag_error_code": "",
-      "xpag_raw_response": "{\"ok\":true,\"provider\":\"XPag\",\"currency\":\"MXN\",\"amount\":100,\"fee\":10,\"qr\":\"8203650015594682\",\"copy_paste\":\"8203650015594682\",\"copyPaste\":\"8203650015594682\",\"code\":\"8203650015594682\",\"deposit_address\":\"\",\"qr_img\":\"\",\"qr_url\":\"https://quickchart.io/qr?size=440&text=8203650015594682\",\"clabe\":\"\",\"bank_name\":\"\",\"beneficiary\":\"\",\"barcode\":\"https://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png\",\"voucher_reference\":\"8203650015594682\",\"checkout_url\":\"\",\"payee_data\":{\"transferType\":\"REFERENCE\",\"reference\":\"8203650015594682\",\"barcode\":\"https://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png\",\"transfer_type\":\"REFERENCE\"},\"transfer_type\":\"REFERENCE\",\"awaiting_instruction\":false,\"method\":\"OXXO\",\"method_requested\":\"OXXO\",\"breb_key\":\"\",\"request_number\":\"pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c\",\"transaction_id\":\"pr_af0b06d1e0d53682d5535a6f0d91e50e6a5c\",\"external_id\":\"FZ-1791761027990-a99d0c52-586e10c9f3-1b622b3a\",\"expire_minutes\":17280,\"status\":\"pending\"}"
+      "timestamp": "2026-10-12T02:14:39.340Z"
     },
     "history": [
       {
-        "id": "msg_1791757475591_hoji0",
+        "id": "msg_1791765049191_jn0mk",
         "sender": "user",
         "type": "text",
         "content": "oi",
-        "timestamp": "18:24"
+        "timestamp": "12:30 AM"
       },
       {
-        "id": "msg_1791757475591_f7thf",
+        "id": "msg_1791765049194_d5cc6",
         "sender": "bot",
         "type": "text",
         "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "18:24"
+        "timestamp": "12:30 AM"
       },
       {
-        "id": "xpag_barcode_1791757477062",
-        "sender": "bot",
-        "type": "image",
-        "content": "QR Code para pagamento via PIX",
-        "mediaUrl": "https://quickchart.io/qr?size=440&text=00020101021226640014br.gov.bcb.pix2542pix.magenpay.io%2Fcob%2FpxkpC1WZTXOcYmVe9OhNMA5204000053039865802BR5925NFCT%20TECNOLOGIA%20E%20SERVICO6009SAO%20PAULO62070503%2A%2A%2A63043CC5",
-        "timestamp": "18:24"
+        "id": "durable_wait_1791765065836",
+        "sender": "system",
+        "type": "info",
+        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
+        "timestamp": "12:31 AM"
       },
       {
-        "id": "xpag_instruction_1791757479292",
-        "sender": "bot",
-        "type": "text",
-        "content": "💠 *Cobrança PIX gerada*\nValor: *R$ 1,00*\n*PIX Copia e Cola:*\n00020101021226640014br.gov.bcb.pix2542pix.magenpay.io/cob/pxkpC1WZTXOcYmVe9OhNMA5204000053039865802BR5925NFCT TECNOLOGIA E SERVICO6009SAO PAULO62070503***63043CC5\nVocê receberá a confirmação aqui assim que o pagamento for identificado.",
-        "timestamp": "18:24"
-      },
-      {
-        "id": "xpag_confirmed_1791757556054",
+        "id": "msg_1791765065837_za785",
         "sender": "bot",
         "type": "text",
-        "content": "✅ ¡Pago confirmado! Gracias. Continuaremos con tu atención.",
-        "timestamp": "18:25"
+        "content": "Timeout",
+        "timestamp": "12:31 AM"
       },
       {
-        "id": "msg_1791757556788_ycet4",
-        "sender": "bot",
-        "type": "text",
-        "content": "Obrigado pelo pagamento!!",
-        "timestamp": "18:25"
-      },
-      {
-        "id": "msg_1791757680478_rof2n",
+        "id": "msg_1791765066065_2snpu",
         "sender": "user",
         "type": "text",
-        "content": "oi",
-        "timestamp": "18:28"
+        "content": "ko",
+        "timestamp": "12:31 AM"
       },
       {
-        "id": "msg_1791757680478_qhnr6",
+        "id": "msg_1791765066065_csy66",
         "sender": "bot",
         "type": "text",
         "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "18:28"
+        "timestamp": "12:31 AM"
       },
       {
-        "id": "msg_1791757794446_tp698",
+        "id": "durable_wait_1791765081841",
+        "sender": "system",
+        "type": "info",
+        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
+        "timestamp": "12:31 AM"
+      },
+      {
+        "id": "msg_1791765081842_i90n9",
+        "sender": "bot",
+        "type": "text",
+        "content": "Timeout",
+        "timestamp": "12:31 AM"
+      },
+      {
+        "id": "msg_1791765084135_yg0x8",
+        "sender": "user",
+        "type": "text",
+        "content": "ok",
+        "timestamp": "12:31 AM"
+      },
+      {
+        "id": "msg_1791765084136_9jiv6",
+        "sender": "bot",
+        "type": "text",
+        "content": "Olá! Como posso ajudar você hoje?",
+        "timestamp": "12:31 AM"
+      },
+      {
+        "id": "msg_1791765089237_0l091",
+        "sender": "user",
+        "type": "text",
+        "content": "ok",
+        "timestamp": "12:31 AM"
+      },
+      {
+        "id": "msg_1791765089238_ff0yy",
+        "sender": "bot",
+        "type": "text",
+        "content": "Funil Passou",
+        "timestamp": "12:31 AM"
+      },
+      {
+        "id": "msg_1791765125319_dnrou",
         "sender": "user",
         "type": "text",
         "content": ".",
-        "timestamp": "18:29"
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "msg_1791757794446_1vo9l",
+        "id": "msg_1791765125320_cse9l",
         "sender": "bot",
         "type": "text",
         "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "18:29"
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "xpag_instruction_1791757796079",
+        "id": "durable_wait_1791765140857",
+        "sender": "system",
+        "type": "info",
+        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
+        "timestamp": "12:32 AM"
+      },
+      {
+        "id": "msg_1791765140857_ll7lm",
         "sender": "bot",
         "type": "text",
-        "content": "🏦 *Pago SPEI generado*\nImporte exacto: *$70.00*\nCLABE: *734180009427210893*\nBanco: STP · Finco Pay · Transfer\nBeneficiario: Zypher Servicos\nRealiza la transferencia por SPEI usando estos datos. Te avisaremos aquí cuando se confirme.",
-        "timestamp": "18:29"
+        "content": "Timeout",
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "msg_1791760698095_okh5f",
-        "sender": "user",
-        "type": "text",
-        "content": ".",
-        "timestamp": "19:18"
-      },
-      {
-        "id": "msg_1791760698095_8mbta",
+        "id": "msg_1791765141316_50e5v",
         "sender": "bot",
         "type": "text",
-        "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "19:18"
+        "content": "Continuando",
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "msg_1791760699901_h31lz",
-        "sender": "bot",
-        "type": "text",
-        "content": "Pedido gerado!!",
-        "timestamp": "19:18"
-      },
-      {
-        "id": "msg_1791760927339_49uz8",
+        "id": "msg_1791765158225_jxlis",
         "sender": "user",
         "type": "text",
         "content": "oi",
-        "timestamp": "19:22"
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "msg_1791760927339_mxjkl",
+        "id": "msg_1791765158226_istz2",
         "sender": "bot",
         "type": "text",
         "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "19:22"
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "msg_1791760928971_2zjmc",
-        "sender": "bot",
-        "type": "text",
-        "content": "Pedido gerado!!\n\nClabe: **734180009425867141**",
-        "timestamp": "19:22"
-      },
-      {
-        "id": "msg_1791761027279_7q7f1",
+        "id": "msg_1791765166471_qjdud",
         "sender": "user",
         "type": "text",
-        "content": "oi",
-        "timestamp": "19:23"
+        "content": "pio",
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "msg_1791761027280_0qdoy",
+        "id": "msg_1791765166471_itel9",
+        "sender": "bot",
+        "type": "text",
+        "content": "Funil Passou",
+        "timestamp": "12:32 AM"
+      },
+      {
+        "id": "msg_1791765174837_dnrii",
+        "sender": "user",
+        "type": "text",
+        "content": "ok",
+        "timestamp": "12:32 AM"
+      },
+      {
+        "id": "msg_1791765174837_7999g",
         "sender": "bot",
         "type": "text",
         "content": "Olá! Como posso ajudar você hoje?",
-        "timestamp": "19:23"
+        "timestamp": "12:32 AM"
       },
       {
-        "id": "msg_1791761029066_jgdt0",
+        "id": "durable_wait_1791765190865",
+        "sender": "system",
+        "type": "info",
+        "content": "O prazo para resposta terminou; continuando pela saída Tempo esgotado.",
+        "timestamp": "12:33 AM"
+      },
+      {
+        "id": "msg_1791765190866_va4uj",
         "sender": "bot",
         "type": "text",
-        "content": "Pedido gerado!!\n\nClabe: ****\n\n8203650015594682\n\nhttps://static.muwe.mx/prod/oxxopay/barCode/20261011/3132123302a2405aa57fc298a537731d.png\n\n\n\n",
-        "timestamp": "19:23"
+        "content": "Timeout",
+        "timestamp": "12:33 AM"
+      },
+      {
+        "id": "msg_1791765191445_1uow1",
+        "sender": "bot",
+        "type": "text",
+        "content": "Continuando",
+        "timestamp": "12:33 AM"
       }
     ],
-    "lastCustomerMessageAt": "2026-10-11T23:23:47.279Z",
-    "windowExpiresAt": "2026-10-12T23:23:47.279Z",
+    "lastCustomerMessageAt": "2026-10-12T00:32:54.837Z",
+    "windowExpiresAt": "2026-10-13T00:32:54.837Z",
     "windowType": "24h_standard",
     "isWindowOpen": true,
     "botPaused": false,
     "flowCompleted": true,
     "autoDeleteDays": 7,
-    "autoDeleteAt": "2026-10-18T22:24:35.590Z",
-    "createdAt": "2026-10-11T22:24:35.590Z",
-    "updatedAt": "2026-10-11T23:23:49.731Z",
+    "autoDeleteAt": "2026-10-19T00:30:49.189Z",
+    "createdAt": "2026-10-12T00:30:49.189Z",
+    "updatedAt": "2026-10-12T00:33:11.895Z",
     "name": "V",
-    "waitingForPayment": true,
-    "waitingPaymentExternalId": "FZ-1791761027990-a99d0c52-586e10c9f3-1b622b3a",
-    "waitingPaymentNodeId": "node_xpag_payment_1791757425167",
-    "executionCheckpointVersion": 1
+    "waitingUntil": null,
+    "waitingNodeId": null,
+    "waitingKind": null,
+    "waitingIsLiveWhatsApp": null,
+    "executionCheckpointVersion": 1,
+    "waitingVariableName": null
   }
 }

@@ -10,6 +10,7 @@ import {
   Mic,
   Video,
   BadgeDollarSign,
+  CircleStop,
 } from 'lucide-react';
 import { NodeType } from '../../types/flow';
 
@@ -90,6 +91,14 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
       icon: GitBranch,
       color: 'bg-orange-600',
       lightColor: 'bg-orange-50 text-orange-700 border-orange-200',
+    },
+    {
+      type: 'end' as NodeType,
+      title: 'Finalizar Funil',
+      desc: 'Encerra a execução e impede reinício automático',
+      icon: CircleStop,
+      color: 'bg-rose-600',
+      lightColor: 'bg-rose-50 text-rose-700 border-rose-200',
     },
   ];
 

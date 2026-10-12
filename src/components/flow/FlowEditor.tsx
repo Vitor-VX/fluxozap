@@ -22,6 +22,7 @@ import { WaitReplyNode } from './WaitReplyNode';
 import { DelayNode } from './DelayNode';
 import { ConditionNode } from './ConditionNode';
 import { XPagPaymentNode } from './XPagPaymentNode';
+import { EndNode } from './EndNode';
 import { NodeSidebar } from './NodeSidebar';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { NodeType, FlowNodeData } from '../../types/flow';
@@ -58,6 +59,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
       wait_reply: WaitReplyNode,
       delay: DelayNode,
       condition: ConditionNode,
+      end: EndNode,
     }),
     []
   );
@@ -100,9 +102,14 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
           return edge;
         });
         setEdges(loadedEdges);
+      } else {
+        setNodes([]);
+        setEdges([]);
       }
     } catch (err) {
       console.error('Error loading flow:', err);
+      setNodes([]);
+      setEdges([]);
     } finally {
       setIsLoading(false);
     }
@@ -240,6 +247,11 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
         conditionVariable: 'resposta',
         conditionOperator: 'contains',
         conditionValue: 'sim',
+      };
+    } else if (type === 'end') {
+      initialData = {
+        label: 'Finalizar Funil',
+        type,
       };
     }
 

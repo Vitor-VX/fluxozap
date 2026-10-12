@@ -108,7 +108,7 @@ O bloco **Tempo de Espera** não usa `sleep`, `setTimeout` longo nem mantém uma
 
 O bloco **Aguardar Resposta** pode permanecer sem prazo ou ter uma expiração opcional. Com prazo ativo, ele possui duas saídas: **Respondeu** e **Tempo esgotado**. Uma resposta cancela o agendamento antes de seguir pela primeira saída; o vencimento limpa a espera e segue pela segunda.
 
-As sessões são salvas em JSON e no MongoDB depois de cada mudança de nó. Na inicialização, o FluxoZap escolhe a cópia mais recente, restaura os checkpoints do novo mecanismo e retoma esperas vencidas. Estados legados sem checkpoint não são executados automaticamente, evitando disparos duplicados durante a migração.
+As sessões são salvas em JSON e no MongoDB depois de cada mudança de nó. Na inicialização, o FluxoZap escolhe a cópia mais recente, restaura os checkpoints do novo mecanismo e retoma esperas vencidas. Estados legados sem checkpoint não são executados automaticamente, evitando disparos duplicados durante a migração. Quando um funil chega a um bloco sem saída ou ao bloco **Finalizar Funil**, a sessão fica concluída e mensagens futuras não reiniciam a automação; o reinício precisa ser feito explicitamente na conversa.
 
 ## Isolamento por número do WhatsApp
 
@@ -124,4 +124,4 @@ O Cloudflare R2 é usado somente para arquivos recebidos dos clientes. Fotos, á
 
 ## Persistência no MongoDB
 
-O servidor sempre conecta no banco `FluxoZap`, independentemente do nome presente na URI, evitando o banco padrão `test`. Os dados são divididos nas collections `project_configs`, `flows`, `sessions`, `whatsapp_accounts`, `api_logs` e `xpag_payments`. Os arquivos em `data/*.json` permanecem como cópia local de contingência e fonte de migração inicial.
+O servidor sempre conecta no banco `FluxoZap`, independentemente do nome presente na URI, evitando o banco padrão `test`. Os dados são divididos nas collections `project_configs`, `flows`, `sessions`, `whatsapp_accounts`, `api_logs` e `xpag_payments`. A collection `flows` é a fonte única dos funis: eles não são carregados, salvos nem semeados a partir de JSON local. Quando não há documento para uma linha, o editor abre um Fluxo 1 vazio. Os demais arquivos em `data/*.json` continuam atendendo seus dados locais de contingência.

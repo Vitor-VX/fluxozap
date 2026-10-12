@@ -302,14 +302,9 @@ function createEmptyAccountFlow(accountId: string, accountName: string) {
   };
 }
 
-let currentFlow: any = defaultFlow;
-if (fs.existsSync(FLOW_FILE)) {
-  try {
-    currentFlow = JSON.parse(fs.readFileSync(FLOW_FILE, 'utf-8'));
-  } catch (err) {
-    console.error('Error reading flow file:', err);
-  }
-}
+// Kept in memory only as a runtime cache. Flow definitions are loaded from and
+// saved to MongoDB; flow.json is deliberately ignored.
+let currentFlow: any = createEmptyAccountFlow('main', 'Principal');
 
 interface WhatsAppAccount {
   id: string;
@@ -330,7 +325,8 @@ let whatsappAccounts: WhatsAppAccount[] = [];
 
 if (fs.existsSync(ACCOUNTS_FILE)) {
   try {
-    whatsappAccounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8'));
+    const savedAccounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8')) as WhatsAppAccount[];
+    whatsappAccounts = savedAccounts.map(({ flow: _legacyLocalFlow, ...account }) => account);
   } catch (err) {
     console.error('Error reading accounts file:', err);
   }
@@ -382,7 +378,7 @@ function syncPrimaryAccountFromMeta(displayPhoneNumber?: string): WhatsAppAccoun
       verifyToken: metaConfig.verifyToken,
       isDefault: true,
       color: 'emerald',
-      flow: { ...JSON.parse(JSON.stringify(currentFlow)), id: 'flow_acc_meta_primary' },
+      flow: createEmptyAccountFlow('acc_meta_primary', 'Linha Principal Meta'),
       createdAt: now,
       updatedAt: now,
     };
@@ -408,7 +404,10 @@ if (metaConfig.displayPhoneNumber && metaConfig.phoneNumberId) {
 
 function saveAccountsToFile() {
   try {
-    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(whatsappAccounts, null, 2));
+    // Never persist funnels inside the local account JSON. Their only durable
+    // source is MongoDB's `flows` collection.
+    const accountsWithoutFlows = whatsappAccounts.map(({ flow: _flow, ...account }) => account);
+    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accountsWithoutFlows, null, 2));
   } catch (err) {
     console.error('Error saving accounts file:', err);
   }
@@ -1405,7 +1404,12 @@ async function runFlowStep(
   // If session hasn't started yet, find start node
   if (!session.currentNodeId) {
     const startNode = nodes.find((n: any) => n.type === 'start') || nodes[0];
-    if (!startNode) return { executionErrors };
+    if (!startNode) {
+      session.flowCompleted = true;
+      session.updatedAt = new Date().toISOString();
+      persistSession(session);
+      return { executionErrors };
+    }
     session.currentNodeId = startNode.id;
   }
 
@@ -1413,7 +1417,12 @@ async function runFlowStep(
   while (safetyCounter < 30) {
     safetyCounter++;
     const currentNode = nodes.find((n: any) => n.id === session.currentNodeId);
-    if (!currentNode) break;
+    if (!currentNode) {
+      session.currentNodeId = null;
+      session.waitingForInput = false;
+      session.flowCompleted = true;
+      break;
+    }
 
     // Handle node action
     if (currentNode.type === 'send_text') {
@@ -1693,6 +1702,24 @@ async function runFlowStep(
         executionErrors.push(err.message || 'Não foi possível agendar a espera.');
         break;
       }
+    } else if (currentNode.type === 'end') {
+      session.currentNodeId = null;
+      session.waitingForInput = false;
+      session.waitingVariableName = undefined;
+      session.waitingForPayment = false;
+      session.waitingPaymentExternalId = undefined;
+      session.waitingPaymentNodeId = undefined;
+      clearDurableWait(session);
+      session.flowCompleted = true;
+      session.executionCheckpointVersion = 1;
+      session.history.push({
+        id: `flow_completed_${Date.now()}`,
+        sender: 'system',
+        type: 'info',
+        content: 'Funil finalizado. Novas mensagens não reiniciarão esta execução automaticamente.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      });
+      break;
     }
 
     // Find next connected edge
@@ -1935,6 +1962,14 @@ async function handleIncomingUserMessage(
     return { executionErrors: [] };
   }
 
+  // A completed funnel is terminal. Keep recording future customer messages,
+  // but only the explicit restart action may open a new execution.
+  if (session.flowCompleted) {
+    session.updatedAt = new Date().toISOString();
+    persistSession(session);
+    return { executionErrors: [] };
+  }
+
   // Do not generate duplicate charges while the customer sends messages before
   // XPag confirms the current PIX/SPEI/OXXO payment.
   if (session.waitingForPayment) {
@@ -1981,7 +2016,7 @@ async function handleIncomingUserMessage(
     }
   }
 
-  // 2. If flow is starting or already completed: check start trigger rule
+  // 2. If the flow has not started yet, check its start trigger rule.
   const triggerMatches = checkStartTriggerMatch(userMessageText, activeFlow);
   if (!triggerMatches) {
     const startNode = activeFlow.nodes?.find((n: any) => n.type === 'start');
@@ -2041,22 +2076,21 @@ async function startServer() {
     config: metaConfig,
     r2Config: r2StorageService.getConfig(),
     xpagConfig,
-    flow: currentFlow,
     sessions: Array.from(sessions.values()),
     accounts: whatsappAccounts,
     logs: apiLogs,
     xpagPayments: Array.from(xpagPayments.values()),
   });
 
-  // Load the dedicated FluxoZap collections into memory after local JSON has
-  // seeded a new/empty database. JSON remains a local fallback copy.
+  // Load the dedicated FluxoZap collections into memory. Flow definitions are
+  // hydrated only from MongoDB and are never restored from local JSON.
   if (mongoService.isConnected()) {
     try {
       const doc = await mongoService.getProjectSnapshot();
       if (doc) {
-        if (doc.flow?.nodes?.length > 0) {
-          currentFlow = doc.flow as any;
-        }
+        const databaseFlows = doc.flows || [];
+        currentFlow = databaseFlows.find((flow: any) => flow?.id === 'flow_main') ||
+          createEmptyAccountFlow('main', 'Principal');
         if (doc.config?.phoneNumberId) {
           metaConfig = { ...metaConfig, ...doc.config };
         }
@@ -2083,7 +2117,10 @@ async function startServer() {
         }
         if (doc.accounts?.length) {
           whatsappAccounts = doc.accounts as WhatsAppAccount[];
-          ensureExclusiveAccountFlows(whatsappAccounts);
+          for (const account of whatsappAccounts) {
+            account.flow = databaseFlows.find((flow: any) => flow?.id === `flow_${account.id}`) ||
+              createEmptyAccountFlow(account.id, account.name);
+          }
           saveAccountsToFile();
         }
         if (doc.xpagPayments?.length) {
@@ -2679,11 +2716,17 @@ async function startServer() {
 
   // API: Multiple WhatsApp Accounts / Phone Numbers Management
   app.get('/api/accounts', (_req: Request, res: Response) => {
-    res.json(whatsappAccounts);
+    res.json(whatsappAccounts.map(({ flow: _flow, ...account }) => account));
   });
 
-  app.post('/api/accounts', (req: Request, res: Response) => {
+  app.post('/api/accounts', async (req: Request, res: Response) => {
     try {
+      if (!mongoService.isConnected()) {
+        return res.status(503).json({
+          success: false,
+          error: 'MongoDB indisponível. Não é possível criar uma linha sem persistir seu Fluxo 1 no banco.',
+        });
+      }
       const { name, phoneNumber, phoneNumberId, wabaId, accessToken, color, isDefault } = req.body;
       if (!name || !phoneNumberId) {
         return res.status(400).json({ success: false, error: 'Nome e Phone Number ID são obrigatórios.' });
@@ -2716,9 +2759,7 @@ async function startServer() {
 
       whatsappAccounts.push(newAccount);
       saveAccountsToFile();
-      if (mongoService.isConnected()) {
-        mongoService.saveFlow(newAccount.flow).catch(console.error);
-      }
+      await mongoService.saveFlow(newAccount.flow);
 
       res.json({
         success: true,
@@ -2780,23 +2821,42 @@ async function startServer() {
     }
 
     saveAccountsToFile();
+    if (mongoService.isConnected()) {
+      mongoService.deleteFlow(`flow_${id}`).catch((err) => {
+        console.error('[MongoDB Atlas] Error deleting account flow:', err);
+      });
+    }
     res.json({ success: true, message: 'Número de WhatsApp removido com sucesso.' });
   });
 
   // API: Get & Save Flow (Supports account-specific flows via ?accountId=)
-  app.get('/api/flow', (req: Request, res: Response) => {
+  app.get('/api/flow', async (req: Request, res: Response) => {
     const accountId = req.query.accountId as string;
+    if (!mongoService.isConnected()) {
+      return res.status(503).json({
+        success: false,
+        error: 'MongoDB indisponível. O funil não será carregado de arquivos JSON locais.',
+      });
+    }
     if (accountId) {
       const account = whatsappAccounts.find((a) => a.id === accountId);
       if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
-      if (!account.flow) account.flow = createEmptyAccountFlow(account.id, account.name);
+      const databaseFlow = await mongoService.getFlow(`flow_${account.id}`);
+      account.flow = databaseFlow || createEmptyAccountFlow(account.id, account.name);
       return res.json(account.flow);
     }
+    currentFlow = await mongoService.getFlow('flow_main') || createEmptyAccountFlow('main', 'Principal');
     res.json(currentFlow);
   });
 
   app.post('/api/flow', async (req: Request, res: Response) => {
     try {
+      if (!mongoService.isConnected()) {
+        return res.status(503).json({
+          success: false,
+          error: 'MongoDB indisponível. O funil não pode ser salvo somente em JSON local.',
+        });
+      }
       const accountId = (req.query.accountId as string) || req.body.accountId;
       const updatedFlowData = {
         ...req.body,
@@ -2811,17 +2871,12 @@ async function startServer() {
           id: `flow_${account.id}`,
         };
         account.updatedAt = new Date().toISOString();
-        saveAccountsToFile();
-        if (mongoService.isConnected()) await mongoService.saveFlow(account.flow);
+        await mongoService.saveFlow(account.flow);
         return res.json({ success: true, message: `Fluxo exclusivo de "${account.name}" salvo com sucesso!` });
       }
 
       currentFlow = updatedFlowData;
-      fs.writeFileSync(FLOW_FILE, JSON.stringify(currentFlow, null, 2));
-
-      if (mongoService.isConnected()) {
-        await mongoService.saveFlow(currentFlow);
-      }
+      await mongoService.saveFlow(currentFlow);
 
       res.json({ success: true, message: 'Fluxo salvo com sucesso!' });
     } catch (err: any) {

@@ -8,7 +8,8 @@ export type NodeType =
   | 'xpag_payment'
   | 'wait_reply'
   | 'condition'
-  | 'delay';
+  | 'delay'
+  | 'end';
 
 export interface WhatsAppAccount {
   id: string; // ex: "acc_principal", "acc_vendas_2"

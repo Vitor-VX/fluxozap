@@ -389,7 +389,7 @@ export const MongoDbSettings: React.FC = () => {
                 Banco e coleções do projeto
               </span>
               <p className="text-slate-600 text-[11px] leading-relaxed">
-                O servidor cria o banco <strong className="font-mono text-emerald-800">FluxoZap</strong> e organiza cada tipo de dado em sua própria collection. Os JSONs locais continuam como contingência; o MongoDB é atualizado em paralelo quando conectado.
+                O servidor cria o banco <strong className="font-mono text-emerald-800">FluxoZap</strong> e organiza cada tipo de dado em sua própria collection. Os funis usam exclusivamente a collection <strong className="font-mono text-emerald-800">flows</strong>; se não houver registro, o editor abre um funil vazio sem importar JSON local.
               </p>
             </div>
           </div>
