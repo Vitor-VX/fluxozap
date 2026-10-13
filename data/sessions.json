@@ -13,14 +13,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "21:04:06",
-      "hora_atual": "21:04:06",
-      "data_hora": "12/10/2026 21:04:06",
+      "hora": "21:15:58",
+      "hora_atual": "21:15:58",
+      "data_hora": "12/10/2026 21:15:58",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T01:04:06.061Z"
+      "timestamp": "2026-10-13T01:15:58.001Z"
     },
     "history": [
       {
@@ -110,14 +110,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "21:04:06",
-      "hora_atual": "21:04:06",
-      "data_hora": "12/10/2026 21:04:06",
+      "hora": "21:15:58",
+      "hora_atual": "21:15:58",
+      "data_hora": "12/10/2026 21:15:58",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T01:04:06.065Z"
+      "timestamp": "2026-10-13T01:15:58.005Z"
     },
     "history": [
       {
@@ -189,14 +189,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "21:04:06",
-      "hora_atual": "21:04:06",
-      "data_hora": "12/10/2026 21:04:06",
+      "hora": "21:15:58",
+      "hora_atual": "21:15:58",
+      "data_hora": "12/10/2026 21:15:58",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T01:04:06.065Z"
+      "timestamp": "2026-10-13T01:15:58.005Z"
     },
     "history": [],
     "lastCustomerMessageAt": "2026-10-11T20:57:24.671Z",
@@ -225,14 +225,14 @@
       "numero_whatsapp": "556993161840",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "21:04:06",
-      "hora_atual": "21:04:06",
-      "data_hora": "12/10/2026 21:04:06",
+      "hora": "21:15:58",
+      "hora_atual": "21:15:58",
+      "data_hora": "12/10/2026 21:15:58",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T01:04:06.065Z"
+      "timestamp": "2026-10-13T01:15:58.006Z"
     },
     "history": [
       {
@@ -277,14 +277,14 @@
       "numero_whatsapp": "556993161840",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "21:04:06",
-      "hora_atual": "21:04:06",
-      "data_hora": "12/10/2026 21:04:06",
+      "hora": "21:15:58",
+      "hora_atual": "21:15:58",
+      "data_hora": "12/10/2026 21:15:58",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T01:04:06.065Z"
+      "timestamp": "2026-10-13T01:15:58.006Z"
     },
     "history": [
       {
@@ -338,10 +338,62 @@
         "mediaUrl": "https://fl.botsync.online/whatsapp-media/1791853165946_audio_01.opus",
         "filename": "1791853165946_audio_01.opus",
         "timestamp": "12:59 AM"
+      },
+      {
+        "id": "msg_1791853559381_9ryaa",
+        "sender": "user",
+        "type": "text",
+        "content": ";",
+        "timestamp": "01:05 AM"
+      },
+      {
+        "id": "msg_1791853559384_d40ko",
+        "sender": "bot",
+        "type": "text",
+        "content": "¡Hola, corazón! ✨\n¿Cómo estás?\n\nTe explico aquí abajo...",
+        "timestamp": "01:05 AM"
+      },
+      {
+        "id": "msg_1791853560302_bmtau",
+        "sender": "bot",
+        "type": "image",
+        "content": "",
+        "mediaUrl": "https://fl.botsync.online/whatsapp-media/1791852683125_img_01.jpeg",
+        "timestamp": "01:06 AM"
+      },
+      {
+        "id": "delay_scheduled_1791853562585",
+        "sender": "system",
+        "type": "info",
+        "content": "Execução agendada para 13/10/2026, 01:06:04.",
+        "timestamp": "01:06 AM"
+      },
+      {
+        "id": "durable_wait_1791853565244",
+        "sender": "system",
+        "type": "info",
+        "content": "O prazo agendado terminou; retomando o funil.",
+        "timestamp": "01:06 AM"
+      },
+      {
+        "id": "msg_1791853565246_je2dr",
+        "sender": "bot",
+        "type": "text",
+        "content": "🎨 ¡Nuestro material exclusivo reúne +1000 modelos de diseños listos para transformar tus mini altares y portarretratos 3D en piezas increíbles, sin diseñar nada desde cero!\n\n✅ Más de 1000 modelos variados: Catrinas, flores de cempasúchil, mascotas y más.\n✅ Sin complicaciones: espacio para Vela LED, es solo imprimir, recortar y armar.\n✅ Ideal para vender o regalar: piezas conmemorativas, tradicionales y modernas.\n✅ Para todos: perfecto para principiantes y para creadores manuales experimentados.\n\n💛 Calidad garantizada: pensado con el corazón para facilitar tu arte y tus ventas en el día a día.\n📂 Entrega inmediata en PDF directo a tu celular o computadora por solo $100 MXN! 💀✨",
+        "timestamp": "01:06 AM"
+      },
+      {
+        "id": "msg_1791853565856_kkum7",
+        "sender": "bot",
+        "type": "audio",
+        "content": "[Mensagem de Voz / Áudio]",
+        "mediaUrl": "https://fl.botsync.online/whatsapp-media/1791853165946_audio_01.opus",
+        "filename": "1791853165946_audio_01.opus",
+        "timestamp": "01:06 AM"
       }
     ],
-    "lastCustomerMessageAt": "2026-10-13T00:59:47.624Z",
-    "windowExpiresAt": "2026-10-14T00:59:47.624Z",
+    "lastCustomerMessageAt": "2026-10-13T01:05:59.381Z",
+    "windowExpiresAt": "2026-10-14T01:05:59.381Z",
     "windowType": "24h_standard",
     "isWindowOpen": true,
     "botPaused": false,
@@ -349,12 +401,15 @@
     "autoDeleteDays": 7,
     "autoDeleteAt": "2026-10-20T00:59:47.621Z",
     "createdAt": "2026-10-13T00:59:47.621Z",
-    "updatedAt": "2026-10-13T00:59:57.877Z",
+    "updatedAt": "2026-10-13T01:06:08.507Z",
     "name": "V",
     "waitingUntil": null,
     "waitingNodeId": null,
     "waitingKind": null,
     "waitingIsLiveWhatsApp": null,
-    "executionCheckpointVersion": 1
+    "executionCheckpointVersion": 1,
+    "waitingForPayment": false,
+    "waitingPaymentExternalId": null,
+    "waitingPaymentNodeId": null
   }
 }

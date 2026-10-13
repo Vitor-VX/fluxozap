@@ -11,6 +11,8 @@ import {
   Node,
   BackgroundVariant,
   Panel,
+  ReactFlowInstance,
+  XYPosition,
 } from '@xyflow/react';
 import { StartNode } from './StartNode';
 import { TextNode } from './TextNode';
@@ -45,6 +47,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   // Define custom node types
   const nodeTypes = useMemo(
@@ -175,11 +178,11 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
   }, []);
 
   // Add new node of specified type
-  const handleAddNode = (type: NodeType) => {
+  const handleAddNode = (type: NodeType, droppedPosition?: XYPosition) => {
     const id = `node_${type}_${Date.now()}`;
     // Position node around center
-    const x = 350 + Math.random() * 80;
-    const y = 200 + Math.random() * 80;
+    const x = droppedPosition?.x ?? 350 + Math.random() * 80;
+    const y = droppedPosition?.y ?? 200 + Math.random() * 80;
 
     let initialData: FlowNodeData = {
       label: 'Novo Bloco',
@@ -279,6 +282,15 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
       };
     }
 
+    if (type !== 'delay' && type !== 'end') {
+      initialData = {
+        ...initialData,
+        nextDelayEnabled: false,
+        nextDelayValue: 1,
+        nextDelayUnit: 'seconds',
+      };
+    }
+
     const newNode: Node = {
       id,
       type,
@@ -288,6 +300,22 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
 
     setNodes((prev) => [...prev, newNode]);
     setSelectedNode({ id, type, data: initialData });
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const type = event.dataTransfer.getData('application/reactflow') as NodeType;
+    if (!type || !reactFlowInstance) return;
+    const position = reactFlowInstance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+    handleAddNode(type, position);
   };
 
   // Update node data from properties panel
@@ -360,7 +388,12 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
       <NodeSidebar onAddNode={handleAddNode} />
 
       {/* Main React Flow Canvas */}
-      <div className="flex-1 h-full relative" onContextMenu={onCanvasContextMenu}>
+      <div
+        className="flex-1 h-full relative"
+        onContextMenu={onCanvasContextMenu}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -371,6 +404,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
           onNodeClick={onNodeClick}
           onEdgeContextMenu={onEdgeContextMenu}
           onPaneClick={onPaneClick}
+          onInit={setReactFlowInstance}
           fitView
           className="bg-slate-50/80"
         >

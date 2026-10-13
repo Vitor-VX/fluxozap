@@ -126,6 +126,12 @@ Fotos, áudios, vídeos e documentos recebidos ou enviados pelos blocos têm lim
 
 O bloco **Enviar Áudio / Voz** envia como mensagem de voz por padrão. O servidor converte automaticamente MP3, M4A, WAV e outros formatos de áudio para OGG/Opus mono e inclui `voice: true` no payload da Meta. A opção pode ser desmarcada no bloco quando o objetivo for enviar um anexo de áudio comum.
 
+## Intervalo entre blocos e editor visual
+
+Cada bloco executável pode ativar **Aguardar antes do próximo bloco**, com duração em segundos, minutos, horas, dias ou meses. Essa espera usa o agendador persistente das sessões: o próximo bloco e o horário de retomada são salvos, portanto o funil continua corretamente após reiniciar o servidor. O bloco independente **Tempo de Espera** permanece disponível.
+
+Os blocos podem ser clicados para inclusão rápida ou arrastados da barra lateral e soltos diretamente na posição desejada do canvas. Depois de criados, continuam livremente reposicionáveis.
+
 ## Persistência no MongoDB
 
 O servidor sempre conecta no banco `FluxoZap`, independentemente do nome presente na URI, evitando o banco padrão `test`. Os dados são divididos nas collections `project_configs`, `flows`, `sessions`, `whatsapp_accounts`, `api_logs` e `xpag_payments`. A collection `flows` é a fonte única dos funis: eles não são carregados, salvos nem semeados a partir de JSON local. Quando não há documento para uma linha, o editor abre um Fluxo 1 vazio. Os demais arquivos em `data/*.json` continuam atendendo seus dados locais de contingência.

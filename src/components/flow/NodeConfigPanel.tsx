@@ -170,6 +170,54 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           />
         </div>
 
+        {selectedNode.type !== 'delay' && selectedNode.type !== 'end' && (
+          <div className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/60 space-y-3">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(data.nextDelayEnabled)}
+                onChange={(e) => onUpdateData(selectedNode.id, { nextDelayEnabled: e.target.checked })}
+                className="mt-0.5 w-4 h-4 accent-indigo-600"
+              />
+              <span>
+                <strong className="block text-indigo-950">Aguardar antes do próximo bloco</strong>
+                <span className="text-[10px] text-indigo-700 leading-relaxed">
+                  Agenda a continuação de forma persistente, mesmo se o servidor reiniciar.
+                </span>
+              </span>
+            </label>
+
+            {data.nextDelayEnabled && (
+              <div className="grid grid-cols-[1fr_1.35fr] gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Tempo</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={data.nextDelayValue || 1}
+                    onChange={(e) => onUpdateData(selectedNode.id, { nextDelayValue: Math.max(1, Number(e.target.value) || 1) })}
+                    className="w-full px-3 py-2 border border-indigo-200 rounded-lg bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Unidade</label>
+                  <select
+                    value={data.nextDelayUnit || 'seconds'}
+                    onChange={(e) => onUpdateData(selectedNode.id, { nextDelayUnit: e.target.value as any })}
+                    className="w-full px-3 py-2 border border-indigo-200 rounded-lg bg-white"
+                  >
+                    <option value="seconds">Segundos</option>
+                    <option value="minutes">Minutos</option>
+                    <option value="hours">Horas</option>
+                    <option value="days">Dias</option>
+                    <option value="months">Meses</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Start Trigger Node Fields */}
         {selectedNode.type === 'start' && (
           <div className="space-y-3.5">

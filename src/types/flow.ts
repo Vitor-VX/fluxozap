@@ -110,6 +110,11 @@ export interface FlowNodeData {
   delayUnit?: 'seconds' | 'minutes' | 'hours' | 'days' | 'months';
   delayUntil?: string;
 
+  // Optional durable delay before following this node's outgoing edge
+  nextDelayEnabled?: boolean;
+  nextDelayValue?: number;
+  nextDelayUnit?: 'seconds' | 'minutes' | 'hours' | 'days' | 'months';
+
   // XPag Global payment block (Brazil and Mexico)
   xpagMethod?: 'PIX' | 'SPEI' | 'OXXO';
   xpagSpeiMode?: 'dynamic' | 'open';
@@ -185,7 +190,8 @@ export interface UserSession {
   waitingPaymentNodeId?: string;
   waitingUntil?: string;
   waitingNodeId?: string;
-  waitingKind?: 'delay' | 'reply_timeout';
+  waitingNextNodeId?: string;
+  waitingKind?: 'delay' | 'reply_timeout' | 'node_delay';
   waitingIsLiveWhatsApp?: boolean;
   executionCheckpointVersion?: number;
   variables: Record<string, string>;

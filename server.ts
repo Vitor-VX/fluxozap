@@ -531,7 +531,8 @@ interface SessionData {
   waitingPaymentNodeId?: string;
   waitingUntil?: string;
   waitingNodeId?: string;
-  waitingKind?: 'delay' | 'reply_timeout';
+  waitingNextNodeId?: string;
+  waitingKind?: 'delay' | 'reply_timeout' | 'node_delay';
   waitingIsLiveWhatsApp?: boolean;
   executionCheckpointVersion?: number;
   variables: Record<string, string>;
@@ -766,8 +767,41 @@ function addDurableWait(from: Date, rawValue: any, rawUnit: any): Date {
 function clearDurableWait(session: SessionData) {
   session.waitingUntil = undefined;
   session.waitingNodeId = undefined;
+  session.waitingNextNodeId = undefined;
   session.waitingKind = undefined;
   session.waitingIsLiveWhatsApp = undefined;
+}
+
+function scheduleNextNodeDelay(
+  session: SessionData,
+  node: any,
+  nextNodeId: string,
+  isLiveWhatsApp: boolean
+): boolean {
+  if (!node?.data?.nextDelayEnabled || !nextNodeId) return false;
+  const dueAt = addDurableWait(
+    new Date(),
+    node.data.nextDelayValue || 1,
+    node.data.nextDelayUnit || 'seconds'
+  );
+  session.waitingUntil = dueAt.toISOString();
+  session.waitingNodeId = node.id;
+  session.waitingNextNodeId = nextNodeId;
+  session.waitingKind = 'node_delay';
+  session.waitingIsLiveWhatsApp = isLiveWhatsApp;
+  session.currentNodeId = nextNodeId;
+  session.flowCompleted = false;
+  session.executionCheckpointVersion = 1;
+  session.updatedAt = new Date().toISOString();
+  session.history.push({
+    id: `node_delay_${Date.now()}`,
+    sender: 'system',
+    type: 'info',
+    content: `Próximo bloco agendado para ${dueAt.toLocaleString('pt-BR')}.`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  });
+  persistSession(session);
+  return true;
 }
 
 function scheduleDurableWait(
@@ -1464,7 +1498,8 @@ async function sendMetaWhatsAppMessage(
 // Engine step runner: executes nodes sequentially until a wait_reply or flow end
 async function runFlowStep(
   session: SessionData,
-  isLiveWhatsApp: boolean = false
+  isLiveWhatsApp: boolean = false,
+  allowPaymentPending: boolean = false
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
   // If bot is paused for this customer, do not execute automated bot steps
   if (session.botPaused) {
@@ -1477,7 +1512,7 @@ async function runFlowStep(
     return { executionErrors: [] };
   }
 
-  if (session.waitingForPayment) {
+  if (session.waitingForPayment && !allowPaymentPending) {
     session.history.push({
       id: `payment_pending_${Date.now()}`,
       sender: 'system',
@@ -1741,6 +1776,9 @@ async function runFlowStep(
           (edge: any) => edge.source === currentNode.id && !edge.sourceHandle
         );
         if (simulationEdge) {
+          if (scheduleNextNodeDelay(session, currentNode, simulationEdge.target, isLiveWhatsApp)) {
+            return { executionErrors, lastLog };
+          }
           session.currentNodeId = simulationEdge.target;
           session.executionCheckpointVersion = 1;
           persistSession(session);
@@ -1767,6 +1805,9 @@ async function runFlowStep(
             ? edges.find((edge: any) => edge.source === currentNode.id && !edge.sourceHandle)
             : undefined);
           if (nextEdge) {
+            if (scheduleNextNodeDelay(session, currentNode, nextEdge.target, isLiveWhatsApp)) {
+              return { executionErrors, lastLog };
+            }
             session.currentNodeId = nextEdge.target;
             session.executionCheckpointVersion = 1;
             persistSession(session);
@@ -1795,6 +1836,9 @@ async function runFlowStep(
             (edge: any) => edge.source === currentNode.id && edge.sourceHandle === 'error'
           );
           if (errorEdge) {
+            if (scheduleNextNodeDelay(session, currentNode, errorEdge.target, isLiveWhatsApp)) {
+              return { executionErrors, lastLog };
+            }
             session.currentNodeId = errorEdge.target;
             session.executionCheckpointVersion = 1;
             persistSession(session);
@@ -1854,6 +1898,9 @@ async function runFlowStep(
     // Find next connected edge
     const outgoingEdge = edges.find((e: any) => e.source === currentNode.id);
     if (outgoingEdge) {
+      if (scheduleNextNodeDelay(session, currentNode, outgoingEdge.target, isLiveWhatsApp)) {
+        return { executionErrors, lastLog };
+      }
       session.currentNodeId = outgoingEdge.target;
       session.executionCheckpointVersion = 1;
       session.updatedAt = new Date().toISOString();
@@ -1888,13 +1935,17 @@ async function resumeDurableWait(session: SessionData): Promise<void> {
       ((!session.accountId || session.accountId === 'unassigned') ? currentFlow : { nodes: [], edges: [] });
     const waitNodeId = session.waitingNodeId;
     const waitKind = session.waitingKind;
+    const waitingNextNodeId = session.waitingNextNodeId;
     const isLiveWhatsApp = session.waitingIsLiveWhatsApp ?? session.phoneNumber !== 'simulator_user';
     const sourceHandle = waitKind === 'reply_timeout' ? 'timeout' : 'completed';
-    const outgoingEdge = activeFlow.edges?.find(
-      (edge: any) => edge.source === waitNodeId && edge.sourceHandle === sourceHandle
-    ) || (waitKind === 'delay'
-      ? activeFlow.edges?.find((edge: any) => edge.source === waitNodeId && !edge.sourceHandle)
-      : undefined);
+    const outgoingEdge = waitKind === 'node_delay'
+      ? undefined
+      : activeFlow.edges?.find(
+          (edge: any) => edge.source === waitNodeId && edge.sourceHandle === sourceHandle
+        ) || (waitKind === 'delay'
+          ? activeFlow.edges?.find((edge: any) => edge.source === waitNodeId && !edge.sourceHandle)
+          : undefined);
+    const nextNodeId = waitKind === 'node_delay' ? waitingNextNodeId : outgoingEdge?.target;
 
     if (waitKind === 'reply_timeout') {
       session.waitingForInput = false;
@@ -1907,14 +1958,20 @@ async function resumeDurableWait(session: SessionData): Promise<void> {
       type: 'info',
       content: waitKind === 'reply_timeout'
         ? 'O prazo para resposta terminou; continuando pela saída Tempo esgotado.'
-        : 'O prazo agendado terminou; retomando o funil.',
+        : waitKind === 'node_delay'
+          ? 'O intervalo entre os blocos terminou; retomando o funil.'
+          : 'O prazo agendado terminou; retomando o funil.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     });
-    session.currentNodeId = outgoingEdge?.target || null;
-    session.flowCompleted = !outgoingEdge;
+    const waitNode = activeFlow.nodes?.find((node: any) => node.id === waitNodeId);
+    if (waitKind === 'reply_timeout' && nextNodeId && waitNode) {
+      if (scheduleNextNodeDelay(session, waitNode, nextNodeId, isLiveWhatsApp)) return;
+    }
+    session.currentNodeId = nextNodeId || null;
+    session.flowCompleted = !nextNodeId;
     session.updatedAt = new Date().toISOString();
     persistSession(session);
-    if (outgoingEdge) await runFlowStep(session, isLiveWhatsApp);
+    if (nextNodeId) await runFlowStep(session, isLiveWhatsApp, waitKind === 'node_delay');
   } finally {
     durableResumeLocks.delete(storageKey);
   }
@@ -2003,6 +2060,11 @@ async function resumeXPagFlowBranch(
     ? activeFlow.edges?.find((edge: any) => edge.source === record.nodeId && !edge.sourceHandle)
     : undefined);
 
+  if (outgoingEdge && paymentNode) {
+    if (scheduleNextNodeDelay(session, paymentNode, outgoingEdge.target, record.isLiveWhatsApp)) {
+      return true;
+    }
+  }
   session.currentNodeId = outgoingEdge?.target || null;
   if (!outgoingEdge) session.flowCompleted = true;
   session.updatedAt = new Date().toISOString();
@@ -2134,6 +2196,9 @@ async function handleIncomingUserMessage(
         (e: any) => e.source === currentNode.id && e.sourceHandle === 'answered'
       ) || edges.find((e: any) => e.source === currentNode.id && !e.sourceHandle);
       if (outgoingEdge) {
+        if (scheduleNextNodeDelay(session, currentNode, outgoingEdge.target, isLiveWhatsApp)) {
+          return { executionErrors: [] };
+        }
         session.currentNodeId = outgoingEdge.target;
         return await runFlowStep(session, isLiveWhatsApp);
       } else {

@@ -106,7 +106,7 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
       <div className="p-4 border-b border-slate-100">
         <h3 className="text-sm font-bold text-slate-900">Blocos de Construção</h3>
         <p className="text-xs text-slate-500 mt-0.5">
-          Clique em um bloco para adicionar ao fluxo do WhatsApp
+          Arraste para o canvas ou clique para adicionar
         </p>
       </div>
 
@@ -117,8 +117,13 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({ onAddNode }) => {
             <button
               key={item.type}
               type="button"
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData('application/reactflow', item.type);
+                event.dataTransfer.effectAllowed = 'move';
+              }}
               onClick={() => onAddNode(item.type)}
-              className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:shadow-xs transition-all bg-white group flex items-start gap-3 cursor-pointer"
+              className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:shadow-xs active:cursor-grabbing transition-all bg-white group flex items-start gap-3 cursor-grab"
             >
               <div
                 className={`w-8 h-8 rounded-lg text-white flex items-center justify-center shrink-0 ${item.color} shadow-xs group-hover:scale-105 transition-transform`}
