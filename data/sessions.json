@@ -13,14 +13,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "16:15:32",
-      "hora_atual": "16:15:32",
-      "data_hora": "12/10/2026 16:15:32",
+      "hora": "20:46:41",
+      "hora_atual": "20:46:41",
+      "data_hora": "12/10/2026 20:46:41",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-12T20:15:32.463Z"
+      "timestamp": "2026-10-13T00:46:41.551Z"
     },
     "history": [
       {
@@ -110,14 +110,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "16:15:32",
-      "hora_atual": "16:15:32",
-      "data_hora": "12/10/2026 16:15:32",
+      "hora": "20:46:41",
+      "hora_atual": "20:46:41",
+      "data_hora": "12/10/2026 20:46:41",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-12T20:15:32.468Z"
+      "timestamp": "2026-10-13T00:46:41.557Z"
     },
     "history": [
       {
@@ -189,14 +189,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "16:15:32",
-      "hora_atual": "16:15:32",
-      "data_hora": "12/10/2026 16:15:32",
+      "hora": "20:46:41",
+      "hora_atual": "20:46:41",
+      "data_hora": "12/10/2026 20:46:41",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-12T20:15:32.469Z"
+      "timestamp": "2026-10-13T00:46:41.558Z"
     },
     "history": [],
     "lastCustomerMessageAt": "2026-10-11T20:57:24.671Z",
@@ -225,14 +225,14 @@
       "numero_whatsapp": "556993161840",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "16:15:32",
-      "hora_atual": "16:15:32",
-      "data_hora": "12/10/2026 16:15:32",
+      "hora": "20:46:41",
+      "hora_atual": "20:46:41",
+      "data_hora": "12/10/2026 20:46:41",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-12T20:15:32.469Z"
+      "timestamp": "2026-10-13T00:46:41.558Z"
     },
     "history": [
       {
@@ -253,7 +253,7 @@
     "lastCustomerMessageAt": "2026-10-11T22:21:57.163Z",
     "windowExpiresAt": "2026-10-12T22:21:57.163Z",
     "windowType": "24h_standard",
-    "isWindowOpen": true,
+    "isWindowOpen": false,
     "botPaused": false,
     "flowCompleted": false,
     "autoDeleteDays": 7,
@@ -261,63 +261,5 @@
     "createdAt": "2026-10-11T22:21:57.162Z",
     "updatedAt": "2026-10-11T22:21:57.586Z",
     "name": "V"
-  },
-  "acc_meta_primary::556993161840": {
-    "phoneNumber": "556993161840",
-    "accountId": "acc_meta_primary",
-    "accountPhoneNumberId": "1409320238929366",
-    "activeFlowId": "flow_acc_meta_primary",
-    "currentNodeId": null,
-    "waitingForInput": false,
-    "variables": {
-      "nome": "V",
-      "whatsapp_nome": "V",
-      "telefone": "556993161840",
-      "phone": "556993161840",
-      "numero_whatsapp": "556993161840",
-      "data": "12/10/2026",
-      "data_atual": "12/10/2026",
-      "hora": "16:15:32",
-      "hora_atual": "16:15:32",
-      "data_hora": "12/10/2026 16:15:32",
-      "dia": "12",
-      "mes": "10",
-      "ano": "2026",
-      "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-12T20:15:32.469Z"
-    },
-    "history": [
-      {
-        "id": "wamid.HBgMNTU2OTkzMTYxODQwFQIAERgSNDAxRTExQTIxNjVGMDc1QTcyAA==",
-        "sender": "agent",
-        "type": "text",
-        "content": "oi",
-        "mediaUrl": "",
-        "filename": "",
-        "caption": "",
-        "timestamp": "04:02 PM",
-        "status": "delivered"
-      }
-    ],
-    "lastCustomerMessageAt": "2026-10-12T02:19:38.121Z",
-    "windowExpiresAt": "2026-10-13T02:19:38.121Z",
-    "windowType": "24h_standard",
-    "isWindowOpen": true,
-    "botPaused": true,
-    "flowCompleted": true,
-    "autoDeleteDays": 7,
-    "autoDeleteAt": "2026-10-19T00:30:49.189Z",
-    "createdAt": "2026-10-12T00:30:49.189Z",
-    "updatedAt": "2026-10-12T16:02:54.791Z",
-    "name": "V",
-    "waitingUntil": null,
-    "waitingNodeId": null,
-    "waitingKind": null,
-    "waitingIsLiveWhatsApp": null,
-    "executionCheckpointVersion": 1,
-    "waitingVariableName": null,
-    "waitingForPayment": false,
-    "waitingPaymentExternalId": null,
-    "waitingPaymentNodeId": null
   }
 }

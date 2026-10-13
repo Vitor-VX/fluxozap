@@ -112,14 +112,14 @@ export const R2StorageSettings: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-bold text-slate-900">
-                    Cloudflare R2 Storage (Mídias Recebidas)
+                    Cloudflare R2 Storage (Mídias do WhatsApp e dos Fluxos)
                   </h2>
                   <span className="text-[11px] font-mono font-bold text-orange-800 bg-orange-100/80 px-2 py-0.5 rounded-md">
                     S3-Compatible
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Armazene somente áudios, fotos, documentos e vídeos recebidos dos clientes. Arquivos enviados pelo atendente vão diretamente para a Meta e não passam pelo R2.
+                  Armazene mídias recebidas dos clientes e, opcionalmente, arquivos locais usados nos blocos de imagem, áudio, vídeo e documento dos fluxos.
                 </p>
               </div>
             </div>

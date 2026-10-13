@@ -120,9 +120,9 @@ O seletor no topo define o contexto de todas as telas. Ao trocar de linha, a con
 
 ## Mídias de entrada e saída
 
-Arquivos enviados pelo atendente ou por blocos do fluxo não são armazenados no R2. O FluxoZap envia o binário diretamente para a biblioteca de mídia da Meta e usa o `media_id` retornado na mensagem, evitando falhas `131053` causadas por links privados ou inacessíveis.
+Nos blocos de imagem, áudio, vídeo e documento, o arquivo local pode ser enviado diretamente para a biblioteca de mídia da Meta ou armazenado no Cloudflare R2. No modo R2, o fluxo guarda a URL persistente e, durante a execução, converte o arquivo em `media_id` usando as credenciais Meta da linha responsável pelo contato. Isso evita falhas `131053` causadas por links privados ou inacessíveis e mantém cada envio associado ao número correto.
 
-O Cloudflare R2 é usado somente para arquivos recebidos dos clientes. Fotos, áudios, vídeos e documentos recebidos têm limite máximo de **100 MB por arquivo**; downloads acima desse tamanho são interrompidos e registrados na conversa sem persistir o conteúdo.
+Fotos, áudios, vídeos e documentos recebidos ou enviados pelos blocos têm limite máximo de **100 MB por arquivo**. Downloads e uploads acima desse tamanho são rejeitados sem persistir o conteúdo.
 
 ## Persistência no MongoDB
 

@@ -159,7 +159,8 @@ class R2StorageService {
   public async uploadFile(
     fileBuffer: Buffer,
     filename: string,
-    mimeType: string
+    mimeType: string,
+    options: { allowLocalFallback?: boolean } = {}
   ): Promise<{ url: string; storageType: 'r2' | 'local'; filename: string }> {
     if (fileBuffer.length > MAX_MEDIA_BYTES) {
       throw new Error('O arquivo excede o limite máximo de 100 MB.');
@@ -191,8 +192,16 @@ class R2StorageService {
         console.log(`[Cloudflare R2] Arquivo enviado com sucesso: ${cleanFilename} -> ${publicUrl}`);
         return { url: publicUrl, storageType: 'r2', filename: cleanFilename };
       } catch (err) {
+        if (options.allowLocalFallback === false) {
+          const reason = err instanceof Error ? err.message : 'erro desconhecido';
+          throw new Error(`Falha ao enviar o arquivo para o Cloudflare R2: ${reason}`);
+        }
         console.error('[Cloudflare R2] Erro no upload para R2, usando fallback local:', err);
       }
+    }
+
+    if (options.allowLocalFallback === false) {
+      throw new Error('Cloudflare R2 não está configurado. Salve e teste as credenciais antes do upload.');
     }
 
     // Fallback: save to local /uploads directory

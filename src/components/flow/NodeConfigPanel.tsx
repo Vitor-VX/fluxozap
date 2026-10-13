@@ -43,6 +43,8 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
   const data = selectedNode.data;
   const isStart = selectedNode.type === 'start';
+  const isMediaNode = ['send_image', 'send_audio', 'send_video', 'send_document'].includes(selectedNode.type);
+  const mediaStorage = data.mediaStorage || 'meta';
 
   const copyVariable = async (variableName: string) => {
     const token = `{{${variableName}}}`;
@@ -51,11 +53,10 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     window.setTimeout(() => setCopiedVariable(null), 1400);
   };
 
-  // Upload outbound media directly to Meta; R2 remains exclusive to received media.
-  const handleUploadToMeta = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!accountId) {
+    if (mediaStorage === 'meta' && !accountId) {
       alert('Selecione uma linha do WhatsApp antes de enviar a mídia.');
       e.target.value = '';
       return;
@@ -70,7 +71,10 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     setUploadSuccess(null);
 
     try {
-      const res = await fetch(`/api/meta/media?accountId=${encodeURIComponent(accountId)}`, {
+      const uploadUrl = mediaStorage === 'r2'
+        ? '/api/r2/media'
+        : `/api/meta/media?accountId=${encodeURIComponent(accountId || '')}`;
+      const res = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -82,21 +86,25 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
       const raw = await res.text();
       let resData: any = {};
       try { resData = JSON.parse(raw); } catch { resData = { error: raw }; }
-      if (!res.ok || !resData.mediaId) {
-        alert(resData.error || 'A Meta recusou o upload do arquivo.');
+      const uploadedReference = mediaStorage === 'r2' ? resData.mediaUrl : resData.mediaId;
+      if (!res.ok || !uploadedReference) {
+        alert(resData.error || `Não foi possível enviar o arquivo para ${mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}.`);
         return;
       }
       onUpdateData(selectedNode.id, {
-        mediaId: resData.mediaId,
-        mediaUrl: '',
+        mediaStorage,
+        mediaId: mediaStorage === 'meta' ? resData.mediaId : '',
+        mediaUrl: mediaStorage === 'r2' ? resData.mediaUrl : '',
         mediaMimeType: resData.mimeType || file.type,
         mediaSize: resData.size || file.size,
         filename: resData.filename || file.name,
       });
-      setUploadSuccess('Arquivo preparado diretamente na Meta. Nenhuma cópia foi salva no R2.');
+      setUploadSuccess(mediaStorage === 'r2'
+        ? 'Arquivo salvo no Cloudflare R2. No envio, ele será associado à Meta da linha que executar o fluxo.'
+        : 'Arquivo preparado diretamente na Meta. Nenhuma cópia foi salva no R2.');
       setTimeout(() => setUploadSuccess(null), 5000);
     } catch (err: any) {
-      alert(err.message || 'Erro ao enviar arquivo diretamente para a Meta.');
+      alert(err.message || `Erro ao enviar arquivo para ${mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}.`);
     } finally {
       setIsUploading(false);
       e.target.value = '';
@@ -321,10 +329,48 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           </div>
         )}
 
-        {data.mediaId && ['send_image', 'send_audio', 'send_video', 'send_document'].includes(selectedNode.type) && (
+        {isMediaNode && (
+          <div className="p-3 rounded-xl border border-slate-200 bg-slate-50">
+            <label className="block font-semibold text-slate-700 mb-2">Destino do arquivo do computador</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => onUpdateData(selectedNode.id, { mediaStorage: 'meta' })}
+                className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${mediaStorage === 'meta'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-200'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+              >
+                Direto para Meta
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateData(selectedNode.id, { mediaStorage: 'r2' })}
+                className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${mediaStorage === 'r2'
+                  ? 'border-orange-500 bg-orange-50 text-orange-700 ring-1 ring-orange-200'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+              >
+                Cloudflare R2
+              </button>
+            </div>
+            <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+              {mediaStorage === 'r2'
+                ? 'O arquivo ficará persistido no R2. Ao executar o bloco, o FluxoZap o envia usando as credenciais Meta da linha ativa.'
+                : 'O arquivo é enviado agora para a biblioteca de mídia da Meta da linha selecionada e não é salvo no R2.'}
+            </p>
+          </div>
+        )}
+
+        {data.mediaId && isMediaNode && (
           <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-[11px]">
             <p className="font-semibold">Mídia pronta na Meta</p>
             <p className="mt-0.5 truncate">{data.filename || data.mediaId} · não armazenada no R2</p>
+          </div>
+        )}
+
+        {data.mediaUrl && mediaStorage === 'r2' && isMediaNode && (
+          <div className="p-2.5 rounded-lg bg-orange-50 border border-orange-200 text-orange-800 text-[11px]">
+            <p className="font-semibold">Mídia salva no Cloudflare R2</p>
+            <p className="mt-0.5 truncate">{data.filename || data.mediaUrl}</p>
           </div>
         )}
 
@@ -332,12 +378,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_image' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Enviar imagem diretamente para a Meta</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar imagem para {mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-purple-300 hover:border-purple-500 rounded-xl bg-purple-50/50 hover:bg-purple-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
-                    <span className="text-xs font-semibold text-purple-700">Enviando para a Meta...</span>
+                    <span className="text-xs font-semibold text-purple-700">Enviando para {mediaStorage === 'r2' ? 'o R2' : 'a Meta'}...</span>
                   </>
                 ) : (
                   <>
@@ -350,7 +396,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={handleUploadToMeta}
+                  onChange={handleMediaUpload}
                   disabled={isUploading}
                   className="hidden"
                 />
@@ -370,7 +416,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                Arquivos locais vão direto para a Meta. Uma URL externa será baixada pelo servidor e convertida em media_id no envio.
+                O destino escolhido acima vale para arquivos do computador. Uma URL externa será baixada pelo servidor e convertida em media_id no envio.
               </p>
             </div>
 
@@ -391,12 +437,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_audio' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Enviar áudio diretamente para a Meta</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar áudio para {mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-teal-300 hover:border-teal-500 rounded-xl bg-teal-50/50 hover:bg-teal-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-teal-600 animate-spin" />
-                    <span className="text-xs font-semibold text-teal-700">Enviando áudio para a Meta...</span>
+                    <span className="text-xs font-semibold text-teal-700">Enviando áudio para {mediaStorage === 'r2' ? 'o R2' : 'a Meta'}...</span>
                   </>
                 ) : (
                   <>
@@ -409,7 +455,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept="audio/*"
-                  onChange={handleUploadToMeta}
+                  onChange={handleMediaUpload}
                   disabled={isUploading}
                   className="hidden"
                 />
@@ -429,7 +475,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <Link className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                Arquivos locais não passam pelo R2; são enviados diretamente para a biblioteca de mídia da Meta.
+                O destino escolhido acima vale para arquivos do computador; URLs externas continuam disponíveis como alternativa.
               </p>
             </div>
 
@@ -450,12 +496,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_video' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Enviar vídeo diretamente para a Meta</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar vídeo para {mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-rose-300 hover:border-rose-500 rounded-xl bg-rose-50/50 hover:bg-rose-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-rose-600 animate-spin" />
-                    <span className="text-xs font-semibold text-rose-700">Enviando vídeo para a Meta...</span>
+                    <span className="text-xs font-semibold text-rose-700">Enviando vídeo para {mediaStorage === 'r2' ? 'o R2' : 'a Meta'}...</span>
                   </>
                 ) : (
                   <>
@@ -468,7 +514,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept="video/*"
-                  onChange={handleUploadToMeta}
+                  onChange={handleMediaUpload}
                   disabled={isUploading}
                   className="hidden"
                 />
@@ -506,12 +552,12 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {selectedNode.type === 'send_document' && (
           <div className="space-y-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Enviar documento diretamente para a Meta</label>
+              <label className="block font-semibold text-slate-700 mb-1">Enviar documento para {mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-amber-300 hover:border-amber-500 rounded-xl bg-amber-50/50 hover:bg-amber-50 cursor-pointer transition-all">
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />
-                    <span className="text-xs font-semibold text-amber-700">Enviando arquivo para a Meta...</span>
+                    <span className="text-xs font-semibold text-amber-700">Enviando arquivo para {mediaStorage === 'r2' ? 'o R2' : 'a Meta'}...</span>
                   </>
                 ) : (
                   <>
@@ -524,7 +570,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <input
                   type="file"
                   accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-                  onChange={handleUploadToMeta}
+                  onChange={handleMediaUpload}
                   disabled={isUploading}
                   className="hidden"
                 />

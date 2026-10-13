@@ -81,6 +81,7 @@ export interface FlowNodeData {
   text?: string;
   
   // Media node properties
+  mediaStorage?: 'meta' | 'r2';
   mediaId?: string;
   mediaUrl?: string;
   mediaMimeType?: string;

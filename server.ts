@@ -2190,6 +2190,41 @@ async function startServer() {
     res.json(result);
   });
 
+  // Persist outbound flow media in R2. Unlike received media, this endpoint
+  // never falls back to local disk because the user explicitly selected R2.
+  app.post('/api/r2/media', express.raw({ type: 'application/octet-stream', limit: '100mb' }), async (req: Request, res: Response) => {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ success: false, error: 'Arquivo não informado.' });
+    }
+    if (req.body.length > MAX_MEDIA_BYTES) {
+      return res.status(413).json({ success: false, error: 'O arquivo excede o limite máximo de 100 MB.' });
+    }
+
+    let filename = String(req.headers['x-file-name'] || 'arquivo');
+    try { filename = decodeURIComponent(filename); } catch { /* keep original */ }
+    filename = path.basename(filename).replace(/[\r\n]/g, '_') || 'arquivo';
+    const mimeType = String(req.headers['x-file-type'] || inferMimeType(filename)).split(';')[0];
+
+    try {
+      const uploaded = await r2StorageService.uploadFile(req.body, filename, mimeType, {
+        allowLocalFallback: false,
+      });
+      return res.json({
+        success: true,
+        mediaUrl: uploaded.url,
+        filename: uploaded.filename,
+        mimeType,
+        size: req.body.length,
+        storage: 'r2',
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Falha ao armazenar a mídia no Cloudflare R2.',
+      });
+    }
+  });
+
   // Upload outgoing media directly to the selected WhatsApp line on Meta.
   // The binary is not persisted in R2 or on the local server.
   app.post('/api/meta/media', express.raw({ type: 'application/octet-stream', limit: '100mb' }), async (req: Request, res: Response) => {
