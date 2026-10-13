@@ -73,7 +73,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     try {
       const uploadUrl = mediaStorage === 'r2'
         ? '/api/r2/media'
-        : `/api/meta/media?accountId=${encodeURIComponent(accountId || '')}`;
+        : `/api/meta/media?accountId=${encodeURIComponent(accountId || '')}${selectedNode.type === 'send_audio' && data.sendAsVoice !== false ? '&voice=true' : ''}`;
       const res = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
@@ -436,6 +436,20 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {/* Audio Node Fields (Voz/Áudio) */}
         {selectedNode.type === 'send_audio' && (
           <div className="space-y-3">
+            <label className="flex items-start gap-3 p-3 rounded-xl border border-teal-200 bg-teal-50/70 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={data.sendAsVoice !== false}
+                onChange={(e) => onUpdateData(selectedNode.id, { sendAsVoice: e.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              />
+              <span>
+                <span className="block text-xs font-semibold text-teal-900">Enviar como mensagem de voz</span>
+                <span className="block mt-0.5 text-[10px] leading-relaxed text-teal-700">
+                  Exibe o áudio como se tivesse sido gravado no WhatsApp. O arquivo será convertido automaticamente para OGG/Opus mono.
+                </span>
+              </span>
+            </label>
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Enviar áudio para {mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}</label>
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-teal-300 hover:border-teal-500 rounded-xl bg-teal-50/50 hover:bg-teal-50 cursor-pointer transition-all">

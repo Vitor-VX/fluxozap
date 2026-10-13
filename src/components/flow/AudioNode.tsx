@@ -23,7 +23,7 @@ export const AudioNode = ({ data, selected }: { data: any; selected?: boolean })
           <span className="text-xs font-semibold text-teal-950">Enviar Áudio / Voz</span>
         </div>
         <span className="text-[10px] font-medium text-teal-700 bg-teal-100/80 px-2 py-0.5 rounded-md">
-          Áudio MP3/OGG
+          {data.sendAsVoice !== false ? 'Voz OGG/Opus' : 'Áudio comum'}
         </span>
       </div>
 
@@ -49,7 +49,7 @@ export const AudioNode = ({ data, selected }: { data: any; selected?: boolean })
             <div className="flex items-center justify-between text-[10px] text-slate-500">
               <span className="font-mono">{data.durationStr || '0:24'}</span>
               <span className="truncate max-w-[110px] text-[10px] text-slate-400">
-                {data.filename || (data.mediaId || data.mediaUrl ? 'audio_whatsapp.mp3' : 'Sem arquivo')}
+                {data.filename || (data.mediaId || data.mediaUrl ? 'audio_whatsapp.ogg' : 'Sem arquivo')}
               </span>
             </div>
           </div>

@@ -3,6 +3,8 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import os from 'os';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { mongoService } from './src/services/mongodb';
 import { r2StorageService } from './src/services/r2Storage';
@@ -1081,6 +1083,91 @@ interface OutgoingMediaPayload {
   mimeType?: string;
   caption?: string;
   filename?: string;
+  voice?: boolean;
+}
+
+const MAX_META_AUDIO_BYTES = 16 * 1024 * 1024;
+const convertedVoiceMediaIds = new Map<string, string>();
+
+async function convertAudioToWhatsAppVoice(
+  buffer: Buffer,
+  filename: string
+): Promise<{ buffer: Buffer; filename: string; mimeType: string }> {
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'fluxozap-voice-'));
+  const extension = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, '') || '.audio';
+  const inputPath = path.join(tempDirectory, `input${extension}`);
+  const outputPath = path.join(tempDirectory, 'voice.ogg');
+  fs.writeFileSync(inputPath, buffer);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const ffmpeg = spawn('ffmpeg', [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', inputPath,
+        '-vn', '-ac', '1',
+        '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip',
+        outputPath,
+      ], { windowsHide: true });
+      let diagnostic = '';
+      ffmpeg.stderr.on('data', (chunk) => {
+        if (diagnostic.length < 4000) diagnostic += String(chunk);
+      });
+      ffmpeg.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          reject(new Error('FFmpeg não foi encontrado. Instale o FFmpeg para converter áudios em mensagem de voz.'));
+        } else {
+          reject(error);
+        }
+      });
+      ffmpeg.once('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Não foi possível converter o áudio para OGG/Opus${diagnostic ? `: ${diagnostic.trim()}` : '.'}`));
+      });
+    });
+
+    const converted = fs.readFileSync(outputPath);
+    if (!converted.length) throw new Error('A conversão do áudio gerou um arquivo vazio.');
+    if (converted.length > MAX_META_AUDIO_BYTES) {
+      throw new Error('A mensagem de voz convertida excede o limite de 16 MB da Meta.');
+    }
+    return {
+      buffer: converted,
+      filename: `${path.basename(filename, path.extname(filename)) || 'audio'}.ogg`,
+      mimeType: 'audio/ogg; codecs=opus',
+    };
+  } finally {
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    if (fs.existsSync(tempDirectory)) fs.rmdirSync(tempDirectory);
+  }
+}
+
+async function downloadMetaMedia(
+  mediaId: string,
+  credentials: MetaAccountCredentials
+): Promise<{ buffer: Buffer; filename: string; mimeType: string }> {
+  if (!credentials.accessToken) throw new Error('Access Token ausente para recuperar o áudio antigo da Meta.');
+  const metadataResponse = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(mediaId)}`, {
+    headers: { Authorization: `Bearer ${credentials.accessToken}` },
+  });
+  const metadataText = await metadataResponse.text();
+  let metadata: any = {};
+  try { metadata = JSON.parse(metadataText); } catch { metadata = {}; }
+  if (!metadataResponse.ok || !metadata.url) {
+    throw new Error(metadata?.error?.message || 'Não foi possível recuperar o áudio antigo na Meta. Reenvie o arquivo no bloco.');
+  }
+
+  const mediaResponse = await fetch(metadata.url, {
+    headers: { Authorization: `Bearer ${credentials.accessToken}` },
+  });
+  if (!mediaResponse.ok) {
+    throw new Error(`Não foi possível baixar o áudio antigo da Meta (HTTP ${mediaResponse.status}). Reenvie o arquivo no bloco.`);
+  }
+  return {
+    buffer: await responseBufferWithLimit(mediaResponse),
+    filename: `audio_${mediaId}.audio`,
+    mimeType: String(metadata.mime_type || mediaResponse.headers.get('content-type') || 'application/octet-stream'),
+  };
 }
 
 function inferMimeType(filename: string, fallback = 'application/octet-stream'): string {
@@ -1153,7 +1240,20 @@ async function resolveOutgoingMediaId(
   payload: OutgoingMediaPayload,
   credentials: MetaAccountCredentials
 ): Promise<string> {
-  if (payload.mediaId) return payload.mediaId;
+  if (payload.mediaId) {
+    const isOpusVoice = /audio\/ogg/i.test(payload.mimeType || '') && /opus/i.test(payload.mimeType || '');
+    if (!payload.voice || isOpusVoice) return payload.mediaId;
+
+    const cacheKey = `${credentials.phoneNumberId || ''}:${payload.mediaId}`;
+    const cachedMediaId = convertedVoiceMediaIds.get(cacheKey);
+    if (cachedMediaId) return cachedMediaId;
+
+    const original = await downloadMetaMedia(payload.mediaId, credentials);
+    const voice = await convertAudioToWhatsAppVoice(original.buffer, original.filename);
+    const uploaded = await uploadBufferToMeta(voice.buffer, voice.filename, voice.mimeType, credentials);
+    convertedVoiceMediaIds.set(cacheKey, uploaded.id);
+    return uploaded.id;
+  }
   if (!payload.mediaUrl) throw new Error('Nenhum arquivo ou URL de mídia foi informado.');
 
   let buffer: Buffer;
@@ -1189,6 +1289,12 @@ async function resolveOutgoingMediaId(
   }
 
   mimeType = mimeType || inferMimeType(filename);
+  if (payload.voice) {
+    const voice = await convertAudioToWhatsAppVoice(buffer, filename);
+    buffer = voice.buffer;
+    filename = voice.filename;
+    mimeType = voice.mimeType;
+  }
   const uploaded = await uploadBufferToMeta(buffer, filename, mimeType, credentials);
   return uploaded.id;
 }
@@ -1247,6 +1353,7 @@ async function sendMetaWhatsAppMessage(
       });
       body.type = messageType;
       body[messageType] = { id: mediaId };
+      if (messageType === 'audio' && payload.voice) body.audio.voice = true;
       if (messageType !== 'audio' && payload.caption) body[messageType].caption = payload.caption;
       if (messageType === 'document') body.document.filename = payload.filename || 'documento.pdf';
     }
@@ -1514,6 +1621,7 @@ async function runFlowStep(
             mediaId: currentNode.data.mediaId,
             mimeType: currentNode.data.mediaMimeType,
             filename: currentNode.data.filename,
+            voice: currentNode.data.sendAsVoice !== false,
           },
           accountCreds
         );
@@ -2238,20 +2346,32 @@ async function startServer() {
       return res.status(413).json({ success: false, error: 'O arquivo excede o limite máximo de 100 MB.' });
     }
 
+    let uploadBuffer = req.body;
     let filename = String(req.headers['x-file-name'] || 'arquivo');
     try { filename = decodeURIComponent(filename); } catch { /* keep original */ }
     filename = path.basename(filename).replace(/[\r\n]/g, '_') || 'arquivo';
-    const mimeType = String(req.headers['x-file-type'] || inferMimeType(filename)).split(';')[0];
+    let mimeType = String(req.headers['x-file-type'] || inferMimeType(filename)).split(';')[0];
+    const sendAsVoice = req.query.voice === 'true';
+    if (sendAsVoice) {
+      try {
+        const voice = await convertAudioToWhatsAppVoice(uploadBuffer, filename);
+        uploadBuffer = voice.buffer;
+        filename = voice.filename;
+        mimeType = voice.mimeType;
+      } catch (err: any) {
+        return res.status(400).json({ success: false, error: err.message || 'Falha ao preparar a mensagem de voz.' });
+      }
+    }
     const logBase = {
       accountId: account.id,
       accountName: account.name,
       phoneNumberId: account.phoneNumberId,
       endpoint: `POST /v21.0/${account.phoneNumberId || '{phoneNumberId}'}/media`,
-      requestPayload: { filename, mimeType, size: req.body.length },
+      requestPayload: { filename, mimeType, size: uploadBuffer.length, voice: sendAsVoice },
     };
 
     try {
-      const uploaded = await uploadBufferToMeta(req.body, filename, mimeType, {
+      const uploaded = await uploadBufferToMeta(uploadBuffer, filename, mimeType, {
         id: account.id,
         name: account.name,
         phoneNumberId: account.phoneNumberId,
@@ -2271,7 +2391,7 @@ async function startServer() {
         mediaId: uploaded.id,
         filename,
         mimeType,
-        size: req.body.length,
+        size: uploadBuffer.length,
         storage: 'meta',
       });
     } catch (err: any) {

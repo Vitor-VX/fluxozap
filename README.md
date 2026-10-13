@@ -124,6 +124,8 @@ Nos blocos de imagem, áudio, vídeo e documento, o arquivo local pode ser envia
 
 Fotos, áudios, vídeos e documentos recebidos ou enviados pelos blocos têm limite máximo de **100 MB por arquivo**. Downloads e uploads acima desse tamanho são rejeitados sem persistir o conteúdo.
 
+O bloco **Enviar Áudio / Voz** envia como mensagem de voz por padrão. O servidor converte automaticamente MP3, M4A, WAV e outros formatos de áudio para OGG/Opus mono e inclui `voice: true` no payload da Meta. A opção pode ser desmarcada no bloco quando o objetivo for enviar um anexo de áudio comum.
+
 ## Persistência no MongoDB
 
 O servidor sempre conecta no banco `FluxoZap`, independentemente do nome presente na URI, evitando o banco padrão `test`. Os dados são divididos nas collections `project_configs`, `flows`, `sessions`, `whatsapp_accounts`, `api_logs` e `xpag_payments`. A collection `flows` é a fonte única dos funis: eles não são carregados, salvos nem semeados a partir de JSON local. Quando não há documento para uma linha, o editor abre um Fluxo 1 vazio. Os demais arquivos em `data/*.json` continuam atendendo seus dados locais de contingência.

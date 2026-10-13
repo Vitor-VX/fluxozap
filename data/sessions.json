@@ -13,14 +13,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "20:46:41",
-      "hora_atual": "20:46:41",
-      "data_hora": "12/10/2026 20:46:41",
+      "hora": "21:04:06",
+      "hora_atual": "21:04:06",
+      "data_hora": "12/10/2026 21:04:06",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T00:46:41.551Z"
+      "timestamp": "2026-10-13T01:04:06.061Z"
     },
     "history": [
       {
@@ -110,14 +110,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "20:46:41",
-      "hora_atual": "20:46:41",
-      "data_hora": "12/10/2026 20:46:41",
+      "hora": "21:04:06",
+      "hora_atual": "21:04:06",
+      "data_hora": "12/10/2026 21:04:06",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T00:46:41.557Z"
+      "timestamp": "2026-10-13T01:04:06.065Z"
     },
     "history": [
       {
@@ -189,14 +189,14 @@
       "numero_whatsapp": "+55 11 99999-0000",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "20:46:41",
-      "hora_atual": "20:46:41",
-      "data_hora": "12/10/2026 20:46:41",
+      "hora": "21:04:06",
+      "hora_atual": "21:04:06",
+      "data_hora": "12/10/2026 21:04:06",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T00:46:41.558Z"
+      "timestamp": "2026-10-13T01:04:06.065Z"
     },
     "history": [],
     "lastCustomerMessageAt": "2026-10-11T20:57:24.671Z",
@@ -225,14 +225,14 @@
       "numero_whatsapp": "556993161840",
       "data": "12/10/2026",
       "data_atual": "12/10/2026",
-      "hora": "20:46:41",
-      "hora_atual": "20:46:41",
-      "data_hora": "12/10/2026 20:46:41",
+      "hora": "21:04:06",
+      "hora_atual": "21:04:06",
+      "data_hora": "12/10/2026 21:04:06",
       "dia": "12",
       "mes": "10",
       "ano": "2026",
       "dia_semana": "segunda-feira",
-      "timestamp": "2026-10-13T00:46:41.558Z"
+      "timestamp": "2026-10-13T01:04:06.065Z"
     },
     "history": [
       {
@@ -253,7 +253,7 @@
     "lastCustomerMessageAt": "2026-10-11T22:21:57.163Z",
     "windowExpiresAt": "2026-10-12T22:21:57.163Z",
     "windowType": "24h_standard",
-    "isWindowOpen": false,
+    "isWindowOpen": true,
     "botPaused": false,
     "flowCompleted": false,
     "autoDeleteDays": 7,
@@ -261,5 +261,100 @@
     "createdAt": "2026-10-11T22:21:57.162Z",
     "updatedAt": "2026-10-11T22:21:57.586Z",
     "name": "V"
+  },
+  "acc_meta_primary::556993161840": {
+    "phoneNumber": "556993161840",
+    "accountId": "acc_meta_primary",
+    "accountPhoneNumberId": "1409320238929366",
+    "activeFlowId": "flow_acc_meta_primary",
+    "currentNodeId": null,
+    "waitingForInput": false,
+    "variables": {
+      "nome": "V",
+      "whatsapp_nome": "V",
+      "telefone": "556993161840",
+      "phone": "556993161840",
+      "numero_whatsapp": "556993161840",
+      "data": "12/10/2026",
+      "data_atual": "12/10/2026",
+      "hora": "21:04:06",
+      "hora_atual": "21:04:06",
+      "data_hora": "12/10/2026 21:04:06",
+      "dia": "12",
+      "mes": "10",
+      "ano": "2026",
+      "dia_semana": "segunda-feira",
+      "timestamp": "2026-10-13T01:04:06.065Z"
+    },
+    "history": [
+      {
+        "id": "msg_1791853187624_xc07b",
+        "sender": "user",
+        "type": "text",
+        "content": ".",
+        "timestamp": "12:59 AM"
+      },
+      {
+        "id": "msg_1791853187624_fmq3i",
+        "sender": "bot",
+        "type": "text",
+        "content": "¡Hola, corazón! ✨\n¿Cómo estás?\n\nTe explico aquí abajo...",
+        "timestamp": "12:59 AM"
+      },
+      {
+        "id": "msg_1791853188796_suoji",
+        "sender": "bot",
+        "type": "image",
+        "content": "",
+        "mediaUrl": "https://fl.botsync.online/whatsapp-media/1791852683125_img_01.jpeg",
+        "timestamp": "12:59 AM"
+      },
+      {
+        "id": "delay_scheduled_1791853192161",
+        "sender": "system",
+        "type": "info",
+        "content": "Execução agendada para 13/10/2026, 00:59:54.",
+        "timestamp": "12:59 AM"
+      },
+      {
+        "id": "durable_wait_1791853194662",
+        "sender": "system",
+        "type": "info",
+        "content": "O prazo agendado terminou; retomando o funil.",
+        "timestamp": "12:59 AM"
+      },
+      {
+        "id": "msg_1791853194663_snoo9",
+        "sender": "bot",
+        "type": "text",
+        "content": "🎨 ¡Nuestro material exclusivo reúne +1000 modelos de diseños listos para transformar tus mini altares y portarretratos 3D en piezas increíbles, sin diseñar nada desde cero!\n\n✅ Más de 1000 modelos variados: Catrinas, flores de cempasúchil, mascotas y más.\n✅ Sin complicaciones: espacio para Vela LED, es solo imprimir, recortar y armar.\n✅ Ideal para vender o regalar: piezas conmemorativas, tradicionales y modernas.\n✅ Para todos: perfecto para principiantes y para creadores manuales experimentados.\n\n💛 Calidad garantizada: pensado con el corazón para facilitar tu arte y tus ventas en el día a día.\n📂 Entrega inmediata en PDF directo a tu celular o computadora por solo $100 MXN! 💀✨",
+        "timestamp": "12:59 AM"
+      },
+      {
+        "id": "msg_1791853195314_b6mja",
+        "sender": "bot",
+        "type": "audio",
+        "content": "[Mensagem de Voz / Áudio]",
+        "mediaUrl": "https://fl.botsync.online/whatsapp-media/1791853165946_audio_01.opus",
+        "filename": "1791853165946_audio_01.opus",
+        "timestamp": "12:59 AM"
+      }
+    ],
+    "lastCustomerMessageAt": "2026-10-13T00:59:47.624Z",
+    "windowExpiresAt": "2026-10-14T00:59:47.624Z",
+    "windowType": "24h_standard",
+    "isWindowOpen": true,
+    "botPaused": false,
+    "flowCompleted": true,
+    "autoDeleteDays": 7,
+    "autoDeleteAt": "2026-10-20T00:59:47.621Z",
+    "createdAt": "2026-10-13T00:59:47.621Z",
+    "updatedAt": "2026-10-13T00:59:57.877Z",
+    "name": "V",
+    "waitingUntil": null,
+    "waitingNodeId": null,
+    "waitingKind": null,
+    "waitingIsLiveWhatsApp": null,
+    "executionCheckpointVersion": 1
   }
 }

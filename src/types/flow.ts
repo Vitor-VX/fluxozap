@@ -86,6 +86,7 @@ export interface FlowNodeData {
   mediaUrl?: string;
   mediaMimeType?: string;
   mediaSize?: number;
+  sendAsVoice?: boolean;
   caption?: string;
   filename?: string;
 
