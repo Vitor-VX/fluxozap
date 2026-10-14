@@ -526,6 +526,7 @@ interface MetaCapiConfig {
   accountId: string;
   enabled: boolean;
   businessManagerId: string;
+  adAccountId: string;
   datasetId: string;
   accessToken: string;
   graphApiVersion: string;
@@ -2497,7 +2498,7 @@ async function startServer() {
     const accountId = String(req.query.accountId || '');
     if (!accountId) return res.status(400).json({ success: false, error: 'Selecione uma linha do WhatsApp.' });
     const config = metaCapiConfigs[accountId] || {
-      accountId, enabled: false, businessManagerId: '', datasetId: '', accessToken: '',
+      accountId, enabled: false, businessManagerId: '', adAccountId: '', datasetId: '', accessToken: '',
       graphApiVersion: 'v24.0', testEventCode: '', onlyAttributed: true,
     };
     const { accessToken: _secret, ...safeConfig } = config;
@@ -2515,6 +2516,7 @@ async function startServer() {
       accountId,
       enabled: Boolean(req.body?.enabled),
       businessManagerId: String(req.body?.businessManagerId || '').trim(),
+      adAccountId: String(req.body?.adAccountId || '').trim(),
       datasetId: String(req.body?.datasetId || '').trim(),
       accessToken,
       graphApiVersion: /^v\d+\.\d+$/.test(String(req.body?.graphApiVersion || '')) ? req.body.graphApiVersion : 'v24.0',
@@ -2548,7 +2550,10 @@ async function startServer() {
     const accessToken = String(req.body?.accessToken || '').trim() || stored?.accessToken || '';
     const versionCandidate = String(req.body?.graphApiVersion || stored?.graphApiVersion || 'v24.0');
     const version = /^v\d+\.\d+$/.test(versionCandidate) ? versionCandidate : 'v24.0';
-    const fallbackBusinessId = String(req.body?.businessManagerId || stored?.businessManagerId || '').trim();
+    const fallbackAdAccountRaw = String(req.body?.adAccountId || stored?.adAccountId || '').trim();
+    const fallbackAdAccountId = fallbackAdAccountRaw
+      ? (fallbackAdAccountRaw.startsWith('act_') ? fallbackAdAccountRaw : `act_${fallbackAdAccountRaw}`)
+      : '';
     if (!accessToken) return res.status(400).json({ success: false, error: 'Informe ou salve primeiro o token de acesso.' });
 
     const graphGetAll = async (initialUrl: string): Promise<any[]> => {
@@ -2571,39 +2576,38 @@ async function startServer() {
     };
 
     try {
-      let businesses: any[] = [];
-      let businessDiscoveryError = '';
+      let adAccounts: any[] = [];
+      let accountDiscoveryError = '';
       try {
-        businesses = await graphGetAll(`https://graph.facebook.com/${version}/me/businesses?fields=id,name,verification_status,vertical&limit=100`);
+        adAccounts = await graphGetAll(
+          `https://graph.facebook.com/${version}/me/adaccounts?fields=id,account_id,name,account_status,currency,timezone_name,business{id,name}&limit=100`
+        );
       } catch (err: any) {
-        businessDiscoveryError = err.message;
-        if (fallbackBusinessId) businesses = [{ id: fallbackBusinessId, name: `BM ${fallbackBusinessId}` }];
+        accountDiscoveryError = err.message;
+        if (fallbackAdAccountId) adAccounts = [{ id: fallbackAdAccountId, account_id: fallbackAdAccountId.replace(/^act_/, ''), name: `Conta ${fallbackAdAccountId}` }];
         else throw err;
       }
 
-      const discovered = await Promise.all(businesses.map(async (business: any) => {
-        const pixelMap = new Map<string, any>();
+      const discovered = await Promise.all(adAccounts.map(async (adAccount: any) => {
         const warnings: string[] = [];
-        for (const edge of ['owned_pixels', 'client_pixels']) {
-          try {
-            const pixels = await graphGetAll(
-              `https://graph.facebook.com/${version}/${encodeURIComponent(business.id)}/${edge}?fields=id,name,owner_business,owner_ad_account,last_fired_time,is_unavailable&limit=100`
-            );
-            for (const pixel of pixels) if (pixel?.id) pixelMap.set(String(pixel.id), { ...pixel, relationship: edge === 'owned_pixels' ? 'owned' : 'shared' });
-          } catch (err: any) {
-            warnings.push(`${edge}: ${err.message}`);
-          }
+        let pixels: any[] = [];
+        try {
+          pixels = await graphGetAll(
+            `https://graph.facebook.com/${version}/${encodeURIComponent(adAccount.id)}/adspixels?fields=id,name,owner_business,owner_ad_account,last_fired_time,is_unavailable&limit=100`
+          );
+        } catch (err: any) {
+          warnings.push(`adspixels: ${err.message}`);
         }
-        return { ...business, pixels: Array.from(pixelMap.values()), warnings };
+        return { ...adAccount, pixels, warnings };
       }));
 
-      res.json({ success: true, businesses: discovered, warning: businessDiscoveryError || undefined });
+      res.json({ success: true, adAccounts: discovered, warning: accountDiscoveryError || undefined });
     } catch (err: any) {
       res.status(err.status === 401 ? 401 : 400).json({
         success: false,
         error: err.message || 'Não foi possível consultar os ativos da Meta.',
         metaErrorCode: err.meta?.code,
-        hint: 'O token precisa permitir business_management e acesso aos ativos de anúncios da BM.',
+        hint: 'O token precisa de acesso às contas de anúncio e permissões de leitura de anúncios.',
       });
     }
   });
@@ -2612,15 +2616,16 @@ async function startServer() {
     const accountId = String(req.body?.accountId || '');
     const stored = metaCapiConfigs[accountId];
     const accessToken = String(req.body?.accessToken || '').trim() || stored?.accessToken || '';
-    const businessManagerId = String(req.body?.businessManagerId || '').trim();
+    const adAccountRaw = String(req.body?.adAccountId || '').trim();
+    const adAccountId = adAccountRaw ? (adAccountRaw.startsWith('act_') ? adAccountRaw : `act_${adAccountRaw}`) : '';
     const name = String(req.body?.name || '').trim();
     const versionCandidate = String(req.body?.graphApiVersion || stored?.graphApiVersion || 'v24.0');
     const version = /^v\d+\.\d+$/.test(versionCandidate) ? versionCandidate : 'v24.0';
-    if (!accessToken || !businessManagerId || !name) {
-      return res.status(400).json({ success: false, error: 'Token, Business Manager e nome do Pixel são obrigatórios.' });
+    if (!accessToken || !adAccountId || !name) {
+      return res.status(400).json({ success: false, error: 'Token, conta de anúncios e nome do Pixel são obrigatórios.' });
     }
     try {
-      const response = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(businessManagerId)}/adspixels`, {
+      const response = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/adspixels`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ name }),

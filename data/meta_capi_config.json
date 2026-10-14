@@ -1,0 +1,12 @@
+{
+  "acc_meta_primary": {
+    "accountId": "acc_meta_primary",
+    "enabled": true,
+    "businessManagerId": "",
+    "datasetId": "",
+    "accessToken": "EAAYIxSBSuAMBSvptPYpVLvJ6SxoURyjYXLY0VnN2e08636SzntnwehAq8IWJO1Y1afYcvTUMFKfoKCkyce4ihaglCqD6RDm8GYqvbK3nrUWZAgjZB9W6ZBLMnJuOYVLM8igKcYP2IoPpAsPNApfVDVR2yuwKCpESWChJbnZCvzJdP5YGBEjc0BRACYaNZCNW0SQZDZD",
+    "graphApiVersion": "v26.0",
+    "testEventCode": "",
+    "onlyAttributed": true
+  }
+}

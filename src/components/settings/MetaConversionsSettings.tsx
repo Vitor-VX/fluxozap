@@ -6,6 +6,7 @@ interface Props { accountId?: string; accountName?: string; }
 interface FormState {
   enabled: boolean;
   businessManagerId: string;
+  adAccountId: string;
   datasetId: string;
   accessToken: string;
   graphApiVersion: string;
@@ -15,12 +16,21 @@ interface FormState {
 }
 
 const empty: FormState = {
-  enabled: false, businessManagerId: '', datasetId: '', accessToken: '',
+  enabled: false, businessManagerId: '', adAccountId: '', datasetId: '', accessToken: '',
   graphApiVersion: 'v24.0', testEventCode: '', onlyAttributed: true, hasAccessToken: false,
 };
 
 interface DiscoveredPixel { id: string; name?: string; relationship?: 'owned' | 'shared'; is_unavailable?: boolean; }
-interface DiscoveredBusiness { id: string; name?: string; verification_status?: string; pixels: DiscoveredPixel[]; warnings?: string[]; }
+interface DiscoveredAdAccount {
+  id: string;
+  account_id?: string;
+  name?: string;
+  account_status?: number;
+  currency?: string;
+  business?: { id: string; name?: string };
+  pixels: DiscoveredPixel[];
+  warnings?: string[];
+}
 
 export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountName }) => {
   const [form, setForm] = useState<FormState>(empty);
@@ -29,7 +39,7 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
   const [testing, setTesting] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
-  const [businesses, setBusinesses] = useState<DiscoveredBusiness[]>([]);
+  const [adAccounts, setAdAccounts] = useState<DiscoveredAdAccount[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [creatingPixel, setCreatingPixel] = useState(false);
   const [newPixelName, setNewPixelName] = useState('');
@@ -37,7 +47,7 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
   useEffect(() => {
     setNotice(null);
     setForm(empty);
-    setBusinesses([]);
+    setAdAccounts([]);
     setNewPixelName('');
     if (!accountId) return;
     setLoading(true);
@@ -90,37 +100,38 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
           accountId,
           accessToken: form.accessToken,
           graphApiVersion: form.graphApiVersion,
-          businessManagerId: form.businessManagerId,
+          adAccountId: form.adAccountId,
         }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(`${data.error || 'Não foi possível buscar os ativos.'}${data.hint ? ` ${data.hint}` : ''}`);
-      const found = Array.isArray(data.businesses) ? data.businesses : [];
-      setBusinesses(found);
-      const selectedBusiness = found.find((item: DiscoveredBusiness) => item.id === form.businessManagerId) || found[0];
-      if (selectedBusiness) {
+      const found: DiscoveredAdAccount[] = Array.isArray(data.adAccounts) ? data.adAccounts : [];
+      setAdAccounts(found);
+      const selectedAccount = found.find((item) => item.id === form.adAccountId) || found[0];
+      if (selectedAccount) {
         setForm((current) => ({
           ...current,
-          businessManagerId: selectedBusiness.id,
-          datasetId: selectedBusiness.pixels.some((pixel: DiscoveredPixel) => pixel.id === current.datasetId)
+          adAccountId: selectedAccount.id,
+          businessManagerId: selectedAccount.business?.id || '',
+          datasetId: selectedAccount.pixels.some((pixel) => pixel.id === current.datasetId)
             ? current.datasetId
-            : (selectedBusiness.pixels[0]?.id || current.datasetId),
+            : (selectedAccount.pixels[0]?.id || current.datasetId),
         }));
       }
-      const pixelCount = found.reduce((total: number, item: DiscoveredBusiness) => total + item.pixels.length, 0);
+      const pixelCount = found.reduce((total, item) => total + item.pixels.length, 0);
       setNotice({
         ok: found.length > 0,
         text: found.length > 0
-          ? `${found.length} BM(s) e ${pixelCount} Pixel(s)/Dataset(s) encontrados.${data.warning ? ` ${data.warning}` : ''}`
-          : 'O token foi aceito, mas nenhuma BM acessível foi encontrada. Você ainda pode informar os IDs manualmente.',
+          ? `${found.length} conta(s) de anúncio e ${pixelCount} Pixel(s)/Dataset(s) encontrados.${data.warning ? ` ${data.warning}` : ''}`
+          : 'O token foi aceito, mas nenhuma conta de anúncios acessível foi encontrada. Você ainda pode informar o ID manualmente.',
       });
     } catch (error: any) { setNotice({ ok: false, text: error.message }); }
     finally { setDiscovering(false); }
   };
 
   const createPixel = async () => {
-    if (!accountId || !form.businessManagerId || !newPixelName.trim()) return;
-    if (!window.confirm(`Criar o Pixel "${newPixelName.trim()}" na BM ${form.businessManagerId}? Essa ação será feita diretamente na Meta.`)) return;
+    if (!accountId || !form.adAccountId || !newPixelName.trim()) return;
+    if (!window.confirm(`Criar o Pixel "${newPixelName.trim()}" na conta de anúncios ${form.adAccountId}? Essa ação será feita diretamente na Meta.`)) return;
     setCreatingPixel(true); setNotice(null);
     try {
       const response = await fetch('/api/meta-capi/pixels', {
@@ -129,16 +140,16 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
           accountId,
           accessToken: form.accessToken,
           graphApiVersion: form.graphApiVersion,
-          businessManagerId: form.businessManagerId,
+          adAccountId: form.adAccountId,
           name: newPixelName.trim(),
         }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Não foi possível criar o Pixel.');
       const pixel: DiscoveredPixel = data.pixel;
-      setBusinesses((current) => current.map((business) => business.id === form.businessManagerId
-        ? { ...business, pixels: [...business.pixels.filter((item) => item.id !== pixel.id), pixel] }
-        : business));
+      setAdAccounts((current) => current.map((adAccount) => adAccount.id === form.adAccountId
+        ? { ...adAccount, pixels: [...adAccount.pixels.filter((item) => item.id !== pixel.id), pixel] }
+        : adAccount));
       setForm((current) => ({ ...current, datasetId: pixel.id }));
       setNewPixelName('');
       setNotice({ ok: true, text: data.message });
@@ -146,7 +157,7 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
     finally { setCreatingPixel(false); }
   };
 
-  const selectedBusiness = businesses.find((business) => business.id === form.businessManagerId);
+  const selectedAdAccount = adAccounts.find((adAccount) => adAccount.id === form.adAccountId);
 
   if (!accountId) return <div className="h-full grid place-items-center text-sm text-slate-500">Conecte e selecione uma linha do WhatsApp primeiro.</div>;
 
@@ -161,6 +172,7 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
           <p className="font-bold flex items-center gap-2"><ShieldCheck className="w-4 h-4" />Atribuição de anúncios do WhatsApp</p>
           <p className="mt-1 leading-relaxed">O ID do anúncio identifica a campanha, mas a atribuição da compra usa o <code>ctwa_clid</code> recebido no webhook do clique. O FluxoZap passa a capturá-lo automaticamente para os novos leads.</p>
+          <p className="mt-2 leading-relaxed"><strong>Conta de anúncios:</strong> usada para localizar e administrar o Pixel. <strong>Envio do Purchase:</strong> feito para <code>/{'{PIXEL_ID}'}/events</code> usando o token; o BM ID não é enviado no evento.</p>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
@@ -170,15 +182,15 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
           </label>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="text-xs font-semibold text-slate-700">ID da Business Manager (BM)
-              <input value={form.businessManagerId} onChange={(e) => update('businessManagerId', e.target.value)} placeholder="123456789..." className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" />
+            <label className="text-xs font-semibold text-slate-700">ID da conta de anúncios
+              <input value={form.adAccountId} onChange={(e) => update('adAccountId', e.target.value)} placeholder="act_123456789..." className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" />
             </label>
             <label className="text-xs font-semibold text-slate-700">ID do Pixel / Dataset
               <input value={form.datasetId} onChange={(e) => update('datasetId', e.target.value)} placeholder="ID usado em /{dataset_id}/events" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" />
             </label>
           </div>
 
-          <label className="block text-xs font-semibold text-slate-700">Token de acesso da BM
+          <label className="block text-xs font-semibold text-slate-700">Token de acesso Meta (usuário ou usuário do sistema)
             <div className="relative mt-1">
               <input type={showToken ? 'text' : 'password'} value={form.accessToken} onChange={(e) => update('accessToken', e.target.value)} placeholder={form.hasAccessToken ? 'Token salvo — deixe vazio para manter' : 'Cole o token de usuário do sistema'} className="w-full rounded-lg border border-slate-300 px-3 py-2 pr-10 text-sm font-normal" />
               <button type="button" onClick={() => setShowToken((value) => !value)} className="absolute right-2 top-2 text-slate-500">{showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
@@ -189,40 +201,45 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-bold text-blue-950">Preenchimento automático pelo token</p>
-                <p className="text-xs text-blue-800 mt-0.5">Busca as BMs e os Pixels próprios ou compartilhados que esse token consegue acessar.</p>
+                <p className="text-xs text-blue-800 mt-0.5">Busca as contas de anúncios e os Pixels/Datasets que esse token consegue acessar.</p>
               </div>
               <button type="button" onClick={discoverAssets} disabled={discovering || (!form.accessToken && !form.hasAccessToken)} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 flex items-center gap-2">
                 {discovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                {discovering ? 'Buscando...' : 'Buscar BMs e Pixels'}
+                {discovering ? 'Buscando...' : 'Buscar contas e Pixels'}
               </button>
             </div>
 
-            {businesses.length > 0 && (
+            {adAccounts.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label className="text-xs font-semibold text-slate-700">Business Manager encontrada
+                <label className="text-xs font-semibold text-slate-700">Conta de anúncios encontrada
                   <select
-                    value={form.businessManagerId}
+                    value={form.adAccountId}
                     onChange={(event) => {
-                      const business = businesses.find((item) => item.id === event.target.value);
-                      setForm((current) => ({ ...current, businessManagerId: event.target.value, datasetId: business?.pixels[0]?.id || '' }));
+                      const adAccount = adAccounts.find((item) => item.id === event.target.value);
+                      setForm((current) => ({
+                        ...current,
+                        adAccountId: event.target.value,
+                        businessManagerId: adAccount?.business?.id || '',
+                        datasetId: adAccount?.pixels[0]?.id || '',
+                      }));
                     }}
                     className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal"
                   >
-                    {businesses.map((business) => <option key={business.id} value={business.id}>{business.name || 'BM sem nome'} · {business.id}</option>)}
+                    {adAccounts.map((adAccount) => <option key={adAccount.id} value={adAccount.id}>{adAccount.name || 'Conta sem nome'} · {adAccount.id}</option>)}
                   </select>
                 </label>
                 <label className="text-xs font-semibold text-slate-700">Pixel / Dataset encontrado
                   <select value={form.datasetId} onChange={(event) => update('datasetId', event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
                     <option value="">Selecione um Pixel</option>
-                    {(selectedBusiness?.pixels || []).map((pixel) => <option key={pixel.id} value={pixel.id}>{pixel.name || 'Pixel sem nome'} · {pixel.id}{pixel.relationship === 'shared' ? ' (compartilhado)' : ''}</option>)}
+                    {(selectedAdAccount?.pixels || []).map((pixel) => <option key={pixel.id} value={pixel.id}>{pixel.name || 'Pixel sem nome'} · {pixel.id}</option>)}
                   </select>
                 </label>
               </div>
             )}
 
-            {form.businessManagerId && (
+            {form.adAccountId && (
               <div className="flex flex-wrap items-end gap-2 border-t border-blue-200 pt-3">
-                <label className="flex-1 min-w-56 text-xs font-semibold text-slate-700">Criar novo Pixel nesta BM
+                <label className="flex-1 min-w-56 text-xs font-semibold text-slate-700">Criar novo Pixel nesta conta de anúncios
                   <input value={newPixelName} onChange={(event) => setNewPixelName(event.target.value)} placeholder="Ex.: FluxoZap Vendas" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal" />
                 </label>
                 <button type="button" onClick={createPixel} disabled={creatingPixel || !newPixelName.trim() || (!form.accessToken && !form.hasAccessToken)} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-blue-800 disabled:opacity-50 flex items-center gap-2">
@@ -231,7 +248,8 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
                 </button>
               </div>
             )}
-            <p className="text-[11px] text-blue-800">Normalmente o token precisa de <code>business_management</code> para listar BMs e <code>ads_read</code>/<code>ads_management</code> para consultar ou criar ativos. Se a Meta bloquear, os campos manuais acima continuam funcionando.</p>
+            {form.businessManagerId && <p className="text-[11px] text-blue-700">BM proprietária informada pela Meta: <code>{form.businessManagerId}</code> — usada apenas como referência, não no envio da conversão.</p>}
+            <p className="text-[11px] text-blue-800">Normalmente o token precisa de <code>ads_read</code> para listar contas/Pixels e <code>ads_management</code> para criar o ativo. Se a Meta bloquear, os campos manuais acima continuam funcionando.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
