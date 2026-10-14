@@ -23,6 +23,7 @@ export interface ProjectSnapshot {
   config?: any;
   r2Config?: any;
   xpagConfig?: any;
+  metaCapiConfig?: any;
   flow?: any;
   flows?: any[];
   sessions?: any[];
@@ -199,6 +200,7 @@ class MongoService {
         meta: initialData.config || {},
         r2: initialData.r2Config || {},
         xpag: initialData.xpagConfig || {},
+        metaCapi: initialData.metaCapiConfig || {},
       });
     }
     // Flows are intentionally never seeded from local JSON. MongoDB is their
@@ -231,6 +233,7 @@ class MongoService {
       config: (project as any)?.meta || {},
       r2Config: (project as any)?.r2 || {},
       xpagConfig: (project as any)?.xpag || {},
+      metaCapiConfig: (project as any)?.metaCapi || {},
       flow: (flows[0] as any)?.data,
       flows: flows.map((item: any) => item.data),
       sessions: sessions.map((item: any) => item.data),
@@ -274,6 +277,12 @@ class MongoService {
   public async saveXPagConfig(data: any): Promise<boolean> {
     if (!this.isConnected()) return false;
     await ProjectConfig.updateOne({ identifier: 'default' }, { $set: { xpag: data } }, { upsert: true });
+    return true;
+  }
+
+  public async saveMetaCapiConfig(data: any): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    await ProjectConfig.updateOne({ identifier: 'default' }, { $set: { metaCapi: data } }, { upsert: true });
     return true;
   }
 

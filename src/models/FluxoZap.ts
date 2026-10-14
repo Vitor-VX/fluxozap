@@ -8,6 +8,7 @@ const ProjectConfigSchema = new Schema(
     meta: { type: Schema.Types.Mixed, default: {} },
     r2: { type: Schema.Types.Mixed, default: {} },
     xpag: { type: Schema.Types.Mixed, default: {} },
+    metaCapi: { type: Schema.Types.Mixed, default: {} },
   },
   { ...options, collection: 'project_configs' }
 );

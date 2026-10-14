@@ -29,12 +29,14 @@ const LOGS_FILE = path.join(DATA_DIR, 'api_logs.json');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'whatsapp_accounts.json');
 const XPAG_CONFIG_FILE = path.join(DATA_DIR, 'xpag_config.json');
 const XPAG_PAYMENTS_FILE = path.join(DATA_DIR, 'xpag_payments.json');
+const META_CAPI_CONFIG_FILE = path.join(DATA_DIR, 'meta_capi_config.json');
+const SESSION_RETENTION_DAYS = 17;
 
 // Interface for API Logs
 interface ApiLogEntry {
   id: string;
   timestamp: string;
-  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'error';
+  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'error';
   direction: 'outbound' | 'inbound';
   endpoint: string;
   accountId?: string;
@@ -462,6 +464,10 @@ interface XPagPaymentRecord {
   response: any;
   createdAt: string;
   updatedAt: string;
+  metaConversionSentAt?: string;
+  metaConversionEventId?: string;
+  metaConversionError?: string;
+  metaConversionKeys?: string[];
 }
 
 let xpagConfig: XPagConfig = {
@@ -516,6 +522,30 @@ if (!fs.existsSync(XPAG_CONFIG_FILE)) {
   saveXPagConfig();
 }
 
+interface MetaCapiConfig {
+  accountId: string;
+  enabled: boolean;
+  businessManagerId: string;
+  datasetId: string;
+  accessToken: string;
+  graphApiVersion: string;
+  testEventCode?: string;
+  onlyAttributed: boolean;
+}
+
+let metaCapiConfigs: Record<string, MetaCapiConfig> = {};
+if (fs.existsSync(META_CAPI_CONFIG_FILE)) {
+  try { metaCapiConfigs = JSON.parse(fs.readFileSync(META_CAPI_CONFIG_FILE, 'utf-8')); }
+  catch (err) { console.error('Error reading Meta CAPI config:', err); }
+}
+
+function saveMetaCapiConfigs() {
+  fs.writeFileSync(META_CAPI_CONFIG_FILE, JSON.stringify(metaCapiConfigs, null, 2));
+  if (mongoService.isConnected()) {
+    mongoService.saveMetaCapiConfig(metaCapiConfigs).catch((err) => console.error('[MongoDB Atlas] Error saving Meta CAPI config:', err));
+  }
+}
+
 // User sessions by phone number
 interface SessionData {
   phoneNumber: string;
@@ -549,6 +579,12 @@ interface SessionData {
     caption?: string;
     timestamp: string;
     status?: string;
+    replyTo?: {
+      messageId: string;
+      sender: 'bot' | 'user' | 'agent' | 'system';
+      content: string;
+      type: 'text' | 'image' | 'audio' | 'video' | 'document' | 'info';
+    };
   }>;
   lastCustomerMessageAt?: string;
   windowExpiresAt?: string;
@@ -558,6 +594,7 @@ interface SessionData {
     isFromAd: boolean;
     sourceType?: string;
     sourceId?: string;
+    ctwaClid?: string;
     sourceUrl?: string;
     headline?: string;
     body?: string;
@@ -593,6 +630,8 @@ if (fs.existsSync(SESSIONS_FILE)) {
     const saved = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
     for (const val of Object.values(saved)) {
       const session = val as SessionData;
+      session.autoDeleteDays = SESSION_RETENTION_DAYS;
+      session.autoDeleteAt = new Date(new Date(session.updatedAt || session.createdAt).getTime() + SESSION_RETENTION_DAYS * 86400000).toISOString();
       sessions.set(sessionStorageKey(session.accountId, session.phoneNumber), session);
     }
   } catch (err) {
@@ -680,7 +719,7 @@ function getOrCreateSession(phoneNumber: string, accountId?: string): SessionDat
   let session = sessions.get(storageKey);
   if (!session) {
     const windowExpires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const autoDelete = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const autoDelete = new Date(now.getTime() + SESSION_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
     session = {
       phoneNumber,
@@ -697,7 +736,7 @@ function getOrCreateSession(phoneNumber: string, accountId?: string): SessionDat
       isWindowOpen: true,
       botPaused: false,
       flowCompleted: false,
-      autoDeleteDays: 7,
+      autoDeleteDays: SESSION_RETENTION_DAYS,
       autoDeleteAt: autoDelete.toISOString(),
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
@@ -712,13 +751,13 @@ function getOrCreateSession(phoneNumber: string, accountId?: string): SessionDat
   return session;
 }
 
-// Periodic cleanup of expired conversations (7 days rule)
+// Periodic cleanup of expired conversations (17 days rule)
 function cleanupExpiredSessions() {
   const now = Date.now();
   let deletedCount = 0;
   for (const [storageKey, s] of sessions.entries()) {
     if (s.phoneNumber === 'simulator_user') continue;
-    const days = s.autoDeleteDays || 7;
+    const days = SESSION_RETENTION_DAYS;
     const lastActive = new Date(s.updatedAt).getTime();
     if (now - lastActive > days * 24 * 60 * 60 * 1000) {
       sessions.delete(storageKey);
@@ -732,6 +771,80 @@ function cleanupExpiredSessions() {
     saveSessionsToFile();
     console.log(`[Auto-Delete Cleanup] ${deletedCount} conversas expiradas foram removidas.`);
   }
+}
+
+async function sendMetaPurchaseConversion(record: XPagPaymentRecord): Promise<void> {
+  const conversionKey = record.chargeMode === 'open'
+    ? (record.e2e || record.paidAt || record.updatedAt)
+    : record.externalId;
+  if (record.metaConversionKeys?.includes(conversionKey)) return;
+  if (record.chargeMode !== 'open' && record.metaConversionSentAt) return;
+  const config = record.accountId ? metaCapiConfigs[record.accountId] : undefined;
+  if (!config?.enabled || !config.datasetId || !config.accessToken) return;
+  const session = sessions.get(sessionStorageKey(record.accountId, record.sessionPhoneNumber));
+  const account = whatsappAccounts.find((item) => item.id === record.accountId);
+  const ctwaClid = session?.referral?.ctwaClid;
+  const wabaId = account?.wabaId;
+  const hasBusinessAttribution = Boolean(ctwaClid && wabaId);
+  if (config.onlyAttributed && !hasBusinessAttribution) {
+    record.metaConversionError = 'Conversão não enviada: o lead precisa de ctwa_clid e a linha precisa do WABA ID.';
+    saveXPagPayments();
+    return;
+  }
+
+  const eventId = `xpag_${record.externalId}_${crypto.createHash('sha256').update(conversionKey).digest('hex').slice(0, 16)}`;
+  const userData: any = {
+    ph: [crypto.createHash('sha256').update(record.sessionPhoneNumber.replace(/\D/g, '')).digest('hex')],
+    external_id: [crypto.createHash('sha256').update(`${record.accountId}:${record.sessionPhoneNumber}`).digest('hex')],
+  };
+  if (hasBusinessAttribution) {
+    userData.ctwa_clid = ctwaClid;
+    userData.whatsapp_business_account_id = wabaId!;
+  }
+  const payload: any = {
+    data: [{
+      event_name: 'Purchase',
+      event_time: Math.floor(new Date(record.paidAt || Date.now()).getTime() / 1000),
+      event_id: eventId,
+      action_source: hasBusinessAttribution ? 'business_messaging' : 'chat',
+      messaging_channel: 'whatsapp',
+      user_data: userData,
+      custom_data: {
+        currency: record.currency,
+        value: record.amount,
+        order_id: record.externalId,
+        ad_id: session?.referral?.sourceId,
+      },
+      partner_agent: 'fluxozap',
+    }],
+  };
+  if (config.testEventCode?.trim()) payload.test_event_code = config.testEventCode.trim();
+  const version = /^v\d+\.\d+$/.test(config.graphApiVersion) ? config.graphApiVersion : 'v24.0';
+  const endpoint = `https://graph.facebook.com/${version}/${encodeURIComponent(config.datasetId)}/events`;
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const responseBody = await response.json().catch(() => ({}));
+    addApiLog({
+      type: 'conversion_event', direction: 'outbound', endpoint: `POST /${version}/${config.datasetId}/events`,
+      accountId: record.accountId, accountName: account?.name, recipient: record.sessionPhoneNumber,
+      messageType: 'Purchase', httpStatus: response.status, success: response.ok,
+      requestPayload: { ...payload, data: payload.data.map((event: any) => ({ ...event, user_data: { ...event.user_data, ph: ['[SHA-256]'], external_id: ['[SHA-256]'] } })) },
+      responseBody,
+      metaErrorMessage: response.ok ? undefined : responseBody?.error?.message,
+    });
+    if (!response.ok) throw new Error(responseBody?.error?.message || `Meta CAPI HTTP ${response.status}`);
+    record.metaConversionSentAt = new Date().toISOString();
+    record.metaConversionEventId = eventId;
+    record.metaConversionError = undefined;
+    record.metaConversionKeys = [...(record.metaConversionKeys || []), conversionKey];
+  } catch (err: any) {
+    record.metaConversionError = err.message || 'Falha ao enviar conversão à Meta.';
+  }
+  saveXPagPayments();
 }
 
 // Run cleanup check every hour
@@ -1118,6 +1231,7 @@ interface OutgoingMediaPayload {
   caption?: string;
   filename?: string;
   voice?: boolean;
+  replyToMessageId?: string;
 }
 
 const MAX_META_AUDIO_BYTES = 16 * 1024 * 1024;
@@ -1375,6 +1489,7 @@ async function sendMetaWhatsAppMessage(
       recipient_type: 'individual',
       to: cleanPhone,
     };
+    if (payload.replyToMessageId) body.context = { message_id: payload.replyToMessageId };
 
     if (messageType === 'text') {
       body.type = 'text';
@@ -2115,7 +2230,8 @@ function checkStartTriggerMatch(userMessageText: string, flow: any): boolean {
 async function handleIncomingUserMessage(
   session: SessionData,
   userMessageText: string,
-  isLiveWhatsApp: boolean = false
+  isLiveWhatsApp: boolean = false,
+  incomingMessage?: { id?: string; replyToMessageId?: string }
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
   // Update customer window: last message received now
   const now = new Date();
@@ -2139,11 +2255,15 @@ async function handleIncomingUserMessage(
 
   // Add user message to session history
   session.history.push({
-    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    id: incomingMessage?.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     sender: 'user',
     type: 'text',
     content: userMessageText,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    replyTo: incomingMessage?.replyToMessageId ? (() => {
+      const original = session.history.find((item) => item.id === incomingMessage.replyToMessageId);
+      return original ? { messageId: original.id, sender: original.sender, content: original.content, type: original.type } : undefined;
+    })() : undefined,
   });
 
   // If human agent paused the bot, only record message without executing flow
@@ -2270,6 +2390,7 @@ async function startServer() {
     config: metaConfig,
     r2Config: r2StorageService.getConfig(),
     xpagConfig,
+    metaCapiConfig: metaCapiConfigs,
     sessions: Array.from(sessions.values()),
     accounts: whatsappAccounts,
     logs: apiLogs,
@@ -2296,7 +2417,12 @@ async function startServer() {
             const mongoUpdatedAt = s?.updatedAt ? new Date(s.updatedAt).getTime() : 0;
             // A hard shutdown can happen after the synchronous JSON checkpoint
             // and before Mongo finishes its async write. Keep whichever copy is newer.
-            if (!localSession || mongoUpdatedAt >= localUpdatedAt) sessions.set(key, s as any);
+            if (!localSession || mongoUpdatedAt >= localUpdatedAt) {
+              const hydratedSession = s as SessionData;
+              hydratedSession.autoDeleteDays = SESSION_RETENTION_DAYS;
+              hydratedSession.autoDeleteAt = new Date(new Date(hydratedSession.updatedAt || hydratedSession.createdAt).getTime() + SESSION_RETENTION_DAYS * 86400000).toISOString();
+              sessions.set(key, hydratedSession);
+            }
           }
         }
         if (doc.logs && doc.logs.length > 0) {
@@ -2308,6 +2434,10 @@ async function startServer() {
         if (doc.xpagConfig?.clientId) {
           xpagConfig = { ...xpagConfig, ...doc.xpagConfig };
           saveXPagConfig();
+        }
+        if (doc.metaCapiConfig && Object.keys(doc.metaCapiConfig).length > 0) {
+          metaCapiConfigs = doc.metaCapiConfig;
+          saveMetaCapiConfigs();
         }
         if (doc.accounts?.length) {
           whatsappAccounts = doc.accounts as WhatsAppAccount[];
@@ -2361,6 +2491,150 @@ async function startServer() {
   app.post('/api/r2/test', async (_req: Request, res: Response) => {
     const result = await r2StorageService.testConnection();
     res.json(result);
+  });
+
+  app.get('/api/meta-capi/config', (req: Request, res: Response) => {
+    const accountId = String(req.query.accountId || '');
+    if (!accountId) return res.status(400).json({ success: false, error: 'Selecione uma linha do WhatsApp.' });
+    const config = metaCapiConfigs[accountId] || {
+      accountId, enabled: false, businessManagerId: '', datasetId: '', accessToken: '',
+      graphApiVersion: 'v24.0', testEventCode: '', onlyAttributed: true,
+    };
+    const { accessToken: _secret, ...safeConfig } = config;
+    res.json({ ...safeConfig, hasAccessToken: Boolean(config.accessToken) });
+  });
+
+  app.post('/api/meta-capi/config', async (req: Request, res: Response) => {
+    const accountId = String(req.body?.accountId || '');
+    if (!whatsappAccounts.some((item) => item.id === accountId)) {
+      return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
+    }
+    const previous = metaCapiConfigs[accountId];
+    const accessToken = String(req.body?.accessToken || '').trim() || previous?.accessToken || '';
+    metaCapiConfigs[accountId] = {
+      accountId,
+      enabled: Boolean(req.body?.enabled),
+      businessManagerId: String(req.body?.businessManagerId || '').trim(),
+      datasetId: String(req.body?.datasetId || '').trim(),
+      accessToken,
+      graphApiVersion: /^v\d+\.\d+$/.test(String(req.body?.graphApiVersion || '')) ? req.body.graphApiVersion : 'v24.0',
+      testEventCode: String(req.body?.testEventCode || '').trim(),
+      onlyAttributed: req.body?.onlyAttributed !== false,
+    };
+    saveMetaCapiConfigs();
+    res.json({ success: true, message: 'API de Conversões salva para esta linha.', hasAccessToken: Boolean(accessToken) });
+  });
+
+  app.post('/api/meta-capi/test', async (req: Request, res: Response) => {
+    const accountId = String(req.body?.accountId || '');
+    const config = metaCapiConfigs[accountId];
+    if (!config?.datasetId || !config.accessToken) return res.status(400).json({ success: false, error: 'Informe Dataset/Pixel ID e token.' });
+    const version = /^v\d+\.\d+$/.test(config.graphApiVersion) ? config.graphApiVersion : 'v24.0';
+    try {
+      const response = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(config.datasetId)}?fields=id,name`, {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return res.status(400).json({ success: false, error: data?.error?.message || `Meta HTTP ${response.status}` });
+      res.json({ success: true, message: `Conexão validada com ${data.name || data.id || 'o dataset'}.`, dataset: data });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/meta-capi/discover', async (req: Request, res: Response) => {
+    const accountId = String(req.body?.accountId || '');
+    const stored = metaCapiConfigs[accountId];
+    const accessToken = String(req.body?.accessToken || '').trim() || stored?.accessToken || '';
+    const versionCandidate = String(req.body?.graphApiVersion || stored?.graphApiVersion || 'v24.0');
+    const version = /^v\d+\.\d+$/.test(versionCandidate) ? versionCandidate : 'v24.0';
+    const fallbackBusinessId = String(req.body?.businessManagerId || stored?.businessManagerId || '').trim();
+    if (!accessToken) return res.status(400).json({ success: false, error: 'Informe ou salve primeiro o token de acesso.' });
+
+    const graphGetAll = async (initialUrl: string): Promise<any[]> => {
+      const items: any[] = [];
+      let nextUrl: string | undefined = initialUrl;
+      for (let page = 0; nextUrl && page < 10; page++) {
+        const response: globalThis.Response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+        const data: any = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error: any = new Error(data?.error?.message || `Meta Graph API HTTP ${response.status}`);
+          error.status = response.status;
+          error.meta = data?.error;
+          throw error;
+        }
+        if (Array.isArray(data?.data)) items.push(...data.data);
+        const candidate: unknown = data?.paging?.next;
+        nextUrl = typeof candidate === 'string' && candidate.startsWith('https://graph.facebook.com/') ? candidate : undefined;
+      }
+      return items;
+    };
+
+    try {
+      let businesses: any[] = [];
+      let businessDiscoveryError = '';
+      try {
+        businesses = await graphGetAll(`https://graph.facebook.com/${version}/me/businesses?fields=id,name,verification_status,vertical&limit=100`);
+      } catch (err: any) {
+        businessDiscoveryError = err.message;
+        if (fallbackBusinessId) businesses = [{ id: fallbackBusinessId, name: `BM ${fallbackBusinessId}` }];
+        else throw err;
+      }
+
+      const discovered = await Promise.all(businesses.map(async (business: any) => {
+        const pixelMap = new Map<string, any>();
+        const warnings: string[] = [];
+        for (const edge of ['owned_pixels', 'client_pixels']) {
+          try {
+            const pixels = await graphGetAll(
+              `https://graph.facebook.com/${version}/${encodeURIComponent(business.id)}/${edge}?fields=id,name,owner_business,owner_ad_account,last_fired_time,is_unavailable&limit=100`
+            );
+            for (const pixel of pixels) if (pixel?.id) pixelMap.set(String(pixel.id), { ...pixel, relationship: edge === 'owned_pixels' ? 'owned' : 'shared' });
+          } catch (err: any) {
+            warnings.push(`${edge}: ${err.message}`);
+          }
+        }
+        return { ...business, pixels: Array.from(pixelMap.values()), warnings };
+      }));
+
+      res.json({ success: true, businesses: discovered, warning: businessDiscoveryError || undefined });
+    } catch (err: any) {
+      res.status(err.status === 401 ? 401 : 400).json({
+        success: false,
+        error: err.message || 'Não foi possível consultar os ativos da Meta.',
+        metaErrorCode: err.meta?.code,
+        hint: 'O token precisa permitir business_management e acesso aos ativos de anúncios da BM.',
+      });
+    }
+  });
+
+  app.post('/api/meta-capi/pixels', async (req: Request, res: Response) => {
+    const accountId = String(req.body?.accountId || '');
+    const stored = metaCapiConfigs[accountId];
+    const accessToken = String(req.body?.accessToken || '').trim() || stored?.accessToken || '';
+    const businessManagerId = String(req.body?.businessManagerId || '').trim();
+    const name = String(req.body?.name || '').trim();
+    const versionCandidate = String(req.body?.graphApiVersion || stored?.graphApiVersion || 'v24.0');
+    const version = /^v\d+\.\d+$/.test(versionCandidate) ? versionCandidate : 'v24.0';
+    if (!accessToken || !businessManagerId || !name) {
+      return res.status(400).json({ success: false, error: 'Token, Business Manager e nome do Pixel são obrigatórios.' });
+    }
+    try {
+      const response = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(businessManagerId)}/adspixels`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ name }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return res.status(400).json({
+        success: false,
+        error: data?.error?.message || `Meta HTTP ${response.status}`,
+        metaErrorCode: data?.error?.code,
+      });
+      res.json({ success: true, message: 'Pixel criado na Meta. Revise e salve a configuração.', pixel: { id: String(data.id), name, relationship: 'owned' } });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Não foi possível criar o Pixel.' });
+    }
   });
 
   // Persist outbound flow media in R2. Unlike received media, this endpoint
@@ -2981,6 +3255,7 @@ async function startServer() {
       record.response = { ...record.response, verification, webhook: event };
       record.updatedAt = new Date().toISOString();
       saveXPagPayments();
+      await sendMetaPurchaseConversion(record);
       await resumeXPagFlowBranch(record, 'paid', record.response);
     } catch (err: any) {
       console.error('[XPag Webhook] Erro ao reconciliar pagamento:', err.message);
@@ -3435,6 +3710,7 @@ async function startServer() {
                   isFromAd: isAd,
                   sourceType: referral.source_type,
                   sourceId: referral.source_id,
+                  ctwaClid: referral.ctwa_clid,
                   sourceUrl: referral.source_url,
                   headline: referral.headline,
                   body: referral.body,
@@ -3453,10 +3729,14 @@ async function startServer() {
 
               // Handle different message types (Text, Image, Audio/Voice, Document, Video)
               let textContent = '';
+              const inboundReply = msg.context?.id ? (() => {
+                const original = session.history.find((item) => item.id === msg.context.id);
+                return original ? { messageId: original.id, sender: original.sender, content: original.content, type: original.type } : undefined;
+              })() : undefined;
 
               if (msg.type === 'text') {
                 textContent = msg.text.body;
-                await handleIncomingUserMessage(session, textContent, true);
+                await handleIncomingUserMessage(session, textContent, true, { id: msg.id, replyToMessageId: msg.context?.id });
               } else if (msg.type === 'image') {
                 textContent = msg.image?.caption || '[Foto Recebida]';
                 // Download and save image in Cloudflare R2 / local
@@ -3475,6 +3755,7 @@ async function startServer() {
                   content: textContent,
                   mediaUrl: mediaUrl || undefined,
                   caption: msg.image?.caption,
+                  replyTo: inboundReply,
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 });
 
@@ -3499,6 +3780,7 @@ async function startServer() {
                   type: 'audio',
                   content: textContent,
                   mediaUrl: mediaUrl || undefined,
+                  replyTo: inboundReply,
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 });
 
@@ -3525,6 +3807,7 @@ async function startServer() {
                   mediaUrl: mediaUrl || undefined,
                   filename: msg.document?.filename,
                   caption: msg.document?.caption,
+                  replyTo: inboundReply,
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 });
 
@@ -3550,6 +3833,7 @@ async function startServer() {
                   content: textContent,
                   mediaUrl: mediaUrl || undefined,
                   caption: msg.video?.caption,
+                  replyTo: inboundReply,
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 });
 
@@ -3638,6 +3922,7 @@ async function startServer() {
       filename,
       pauseBot = false,
       accountId,
+      replyToMessageId,
     } = req.body;
 
     const cleanPhone = phoneNumber.replace(/\D/g, '');
@@ -3660,15 +3945,15 @@ async function startServer() {
     try {
       let sendResult: any = { success: true };
       if (type === 'text') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'text', { text }, accountCredentials);
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'text', { text, replyToMessageId }, accountCredentials);
       } else if (type === 'image') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'image', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename }, accountCredentials);
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'image', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       } else if (type === 'document') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'document', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename }, accountCredentials);
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'document', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       } else if (type === 'audio') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename }, accountCredentials);
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename, replyToMessageId }, accountCredentials);
       } else if (type === 'video') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'video', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename }, accountCredentials);
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'video', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       }
 
       // Add to session history as agent message
@@ -3682,6 +3967,10 @@ async function startServer() {
         caption,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         status: sendResult.success ? 'delivered' : 'failed',
+        replyTo: replyToMessageId ? (() => {
+          const original = session.history.find((item) => item.id === replyToMessageId);
+          return original ? { messageId: original.id, sender: original.sender, content: original.content, type: original.type } : undefined;
+        })() : undefined,
       };
 
       session.history.push(msgItem);
@@ -3792,7 +4081,7 @@ async function startServer() {
     res.json({ success: true, message: 'Histórico da conversa limpo.', session });
   });
 
-  // API: Cleanup expired sessions (> 7 days)
+  // API: Cleanup expired sessions (> 17 days)
   app.post('/api/sessions/cleanup-expired', (_req: Request, res: Response) => {
     cleanupExpiredSessions();
     res.json({ success: true, message: 'Limpeza de conversas expiradas concluída.' });
@@ -3808,102 +4097,8 @@ async function startServer() {
     if (accountId && accountId !== 'all') {
       list = list.filter((s) => s.accountId === accountId);
     }
+    list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     res.json(list);
-  });
-
-  // API: Simulator Endpoints
-  app.get('/api/simulator/session', (req: Request, res: Response) => {
-    const account = whatsappAccounts.find((item) => item.id === String(req.query.accountId || ''));
-    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
-    const session = getOrCreateSession('simulator_user', account.id);
-    res.json(session);
-  });
-
-  app.post('/api/simulator/send', async (req: Request, res: Response) => {
-    const { message, accountId } = req.body;
-    const account = whatsappAccounts.find((item) => item.id === accountId);
-    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
-    const session = getOrCreateSession('simulator_user', account.id);
-    await handleIncomingUserMessage(session, message || 'oi', false);
-    res.json(session);
-  });
-
-  app.post('/api/simulator/reset', async (req: Request, res: Response) => {
-    const now = new Date();
-    const accountId = req.body?.accountId as string | undefined;
-    const account = whatsappAccounts.find((item) => item.id === accountId);
-    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
-    const resolvedAccountId = account.id;
-    const activeFlow = account.flow || createEmptyAccountFlow(account.id, account.name);
-    const session: SessionData = {
-      phoneNumber: 'simulator_user',
-      name: 'Simulador WhatsApp',
-      accountId: resolvedAccountId,
-      accountPhoneNumberId: account?.phoneNumberId,
-      activeFlowId: activeFlow.id,
-      currentNodeId: null,
-      waitingForInput: false,
-      variables: getDefaultSessionVariables({
-        phoneNumber: '+55 11 99999-0000',
-        name: 'Simulador WhatsApp',
-      }),
-      history: [],
-      isWindowOpen: true,
-      windowType: '24h_standard',
-      windowExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-      botPaused: false,
-      flowCompleted: false,
-      autoDeleteDays: 7,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    };
-    sessions.set(sessionStorageKey(resolvedAccountId, 'simulator_user'), session);
-    await runFlowStep(session, false);
-    persistSession(session);
-    res.json(session);
-  });
-
-  // API: Simulate Meta / Facebook Ads Referral lead for testing (72-hour window)
-  app.post('/api/simulator/simulate-ad-lead', (req: Request, res: Response) => {
-    const { phoneNumber = '+55 11 99999-9999', headline = 'Campanha Facebook Ads - 50% OFF', adId = 'ad_meta_8392104', accountId } = req.body || {};
-    const cleanPhone = (phoneNumber || '5511999999999').replace(/\D/g, '');
-    const account = whatsappAccounts.find((item) => item.id === accountId);
-    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
-    const session = getOrCreateSession(cleanPhone, account.id);
-    const now = new Date();
-
-    session.referral = {
-      isFromAd: true,
-      sourceType: 'ad',
-      sourceId: adId,
-      sourceUrl: 'https://fb.me/ad_fluxozap',
-      headline: headline,
-      body: 'Lead originado pelo clique no anúncio patrocinado do Facebook Ads / Instagram',
-      mediaType: 'image',
-      imageUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&auto=format&fit=crop',
-      receivedAt: now.toISOString(),
-    };
-    session.windowType = '72h_ads';
-    session.windowExpiresAt = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
-    session.isWindowOpen = true;
-    session.name = 'Lead Facebook Ads';
-    session.variables = { ...session.variables, phone: cleanPhone, origem: 'Meta Ads' };
-    refreshDefaultSessionVariables(session);
-    session.history.push({
-      id: `ad_${Date.now()}`,
-      sender: 'user',
-      type: 'text',
-      content: 'Olá! Vi o anúncio no Facebook e gostaria de saber mais.',
-      timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    });
-    session.updatedAt = now.toISOString();
-    persistSession(session);
-
-    res.json({
-      success: true,
-      message: `Lead de anúncio Meta Ads simulado com sucesso para ${cleanPhone} com janela de 72h!`,
-      session,
-    });
   });
 
   // Vite middleware in dev or static files in production

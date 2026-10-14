@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Workflow,
-  MessageSquareCode,
   Users,
   Settings,
   Bot,
@@ -10,11 +9,12 @@ import {
   Cloud,
   Unplug,
   BadgeDollarSign,
+  Activity,
 } from 'lucide-react';
 import { FlowEditor } from './components/flow/FlowEditor';
-import { WhatsAppSimulator } from './components/simulator/WhatsAppSimulator';
 import { MetaApiSettings } from './components/settings/MetaApiSettings';
 import { XPagSettings } from './components/settings/XPagSettings';
+import { MetaConversionsSettings } from './components/settings/MetaConversionsSettings';
 import { ConversationsList } from './components/conversations/ConversationsList';
 import { LogsViewer } from './components/logs/LogsViewer';
 import { MongoDbSettings } from './components/database/MongoDbSettings';
@@ -25,7 +25,7 @@ import { AccountManagerModal } from './components/accounts/AccountManagerModal';
 import { WhatsAppAccount } from './types/flow';
 import { DollarSign } from 'lucide-react';
 
-type ActiveTab = 'editor' | 'simulator' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag';
+type ActiveTab = 'editor' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag' | 'capi';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
@@ -153,19 +153,6 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('simulator')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-              activeTab === 'simulator'
-                ? 'bg-white text-slate-900 shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <MessageSquareCode className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Simulador WhatsApp</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setActiveTab('conversations')}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'conversations'
@@ -252,6 +239,17 @@ export default function App() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('capi')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === 'capi' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5 text-blue-600" />
+            <span>Meta Conversões</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'settings'
@@ -297,9 +295,6 @@ export default function App() {
             accountName={activeAccount?.name}
           />
         )}
-        {activeTab === 'simulator' && (
-          <WhatsAppSimulator accountId={activeAccountId} accountName={activeAccount?.name} />
-        )}
         {activeTab === 'conversations' && (
           <ConversationsList accounts={accounts} activeAccountId={activeAccountId} />
         )}
@@ -312,6 +307,7 @@ export default function App() {
         {activeTab === 'mongodb' && <MongoDbSettings />}
         {activeTab === 'r2' && <R2StorageSettings />}
         {activeTab === 'xpag' && <XPagSettings />}
+        {activeTab === 'capi' && <MetaConversionsSettings accountId={activeAccountId} accountName={activeAccount?.name} />}
         {activeTab === 'settings' && (
           <MetaApiSettings
             onOpenLogs={() => setActiveTab('logs')}

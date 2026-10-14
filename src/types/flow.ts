@@ -152,6 +152,7 @@ export interface ReferralData {
   isFromAd: boolean;
   sourceType?: 'ad' | 'post';
   sourceId?: string; // ad_id / post_id
+  ctwaClid?: string; // click id required for Meta business-messaging attribution
   sourceUrl?: string;
   headline?: string;
   body?: string;
@@ -174,6 +175,12 @@ export interface ChatMessage {
   caption?: string;
   timestamp: string;
   status?: 'sent' | 'delivered' | 'read' | 'failed';
+  replyTo?: {
+    messageId: string;
+    sender: 'bot' | 'user' | 'agent' | 'system';
+    content: string;
+    type: ChatMessage['type'];
+  };
 }
 
 export interface UserSession {
@@ -213,7 +220,7 @@ export interface UserSession {
   flowCompleted?: boolean;
   status?: 'active' | 'paused' | 'completed' | 'archived';
 
-  // Auto deletion rule (in days, e.g. 7 days)
+  // Auto deletion rule (in days)
   autoDeleteDays?: number;
   autoDeleteAt?: string;
 }
@@ -232,7 +239,7 @@ export interface FlowDefinition {
 export interface ApiLogEntry {
   id: string;
   timestamp: string;
-  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'error';
+  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'error';
   direction: 'outbound' | 'inbound';
   endpoint: string;
   accountId?: string;

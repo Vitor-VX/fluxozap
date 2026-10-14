@@ -27,6 +27,9 @@ import {
   Bot,
   Volume2,
   Video,
+  Copy,
+  Reply,
+  X,
 } from 'lucide-react';
 import { UserSession, ChatMessage, WhatsAppAccount } from '../../types/flow';
 
@@ -56,12 +59,17 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [flowRestoredNotice, setFlowRestoredNotice] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // File input ref for choosing files from computer
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll chat
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const selectedConversationRef = useRef('');
 
   const fetchSessions = async (silent: boolean = false, accountId: string | undefined = activeAccountId) => {
     if (!silent) setIsLoading(true);
@@ -103,14 +111,27 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     setAgentCaption('');
     setAgentFilename('');
     setSendError(null);
+    setReplyingTo(null);
     fetchSessions(false, activeAccountId);
     const interval = setInterval(() => fetchSessions(true, activeAccountId), 4000);
     return () => clearInterval(interval);
   }, [activeAccountId]);
 
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [selectedSession?.history]);
+    if (!selectedSession) return;
+    const conversationKey = `${selectedSession.accountId || ''}:${selectedSession.phoneNumber}`;
+    const changedConversation = selectedConversationRef.current !== conversationKey;
+    if (changedConversation) {
+      selectedConversationRef.current = conversationKey;
+      shouldStickToBottomRef.current = true;
+    }
+    if (changedConversation || shouldStickToBottomRef.current) {
+      requestAnimationFrame(() => {
+        const container = chatScrollRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
+      });
+    }
+  }, [selectedSession?.accountId, selectedSession?.phoneNumber, selectedSession?.history.length]);
 
   // Window remaining calculation
   const getWindowInfo = (session: UserSession) => {
@@ -167,6 +188,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
           filename: agentFilename,
           pauseBot: true, // Agent takes over
           accountId: selectedSession.accountId,
+          replyToMessageId: replyingTo?.id,
         }),
       });
 
@@ -181,6 +203,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
         setAgentCaption('');
         setAgentFilename('');
         setAgentMediaType('text');
+        setReplyingTo(null);
         fetchSessions(true);
       } else {
         setSendError(data.error || data.diagnosticTip || 'Erro ao enviar mensagem.');
@@ -255,31 +278,6 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     }
   };
 
-  // Simulate Meta Ads Lead with 72h window
-  const handleSimulateAdLead = async () => {
-    try {
-      const res = await fetch('/api/simulator/simulate-ad-lead', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumber: '+55 11 99999-9999',
-          headline: 'Campanha Meta Ads - Janela 72 Horas',
-          adId: `ad_${Date.now().toString().slice(-6)}`,
-          accountId: activeAccountId,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        fetchSessions(false);
-        if (data.session) {
-          setSelectedSession(data.session);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   // Restart Flow
   const handleRestartFlow = async (triggerNow: boolean) => {
     if (!selectedSession) return;
@@ -347,9 +345,9 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     }
   };
 
-  // Cleanup expired (> 7 days)
+  // Cleanup expired (> 17 days)
   const handleCleanupExpired = async () => {
-    if (!confirm('Deseja executar a limpeza automática de conversas inativas há mais de 7 dias?')) return;
+    if (!confirm('Deseja executar a limpeza automática de conversas inativas há mais de 17 dias?')) return;
     try {
       const res = await fetch('/api/sessions/cleanup-expired', { method: 'POST' });
       if (res.ok) {
@@ -383,7 +381,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
       return s.botPaused;
     }
     return true;
-  });
+  }).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   return (
     <div className="flex h-full bg-slate-100 overflow-hidden text-xs">
@@ -401,14 +399,6 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={handleSimulateAdLead}
-                className="p-1.5 rounded-lg text-blue-600 hover:text-blue-800 hover:bg-blue-50 cursor-pointer"
-                title="Simular Lead de Anúncio Meta Ads (Ativa Janela de 72h)"
-              >
-                <Megaphone className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
                 onClick={() => fetchSessions(false)}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
                 title="Atualizar conversas"
@@ -419,7 +409,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                 type="button"
                 onClick={handleCleanupExpired}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
-                title="Auto-limpar conversas com mais de 7 dias"
+                title="Auto-limpar conversas com mais de 17 dias"
               >
                 <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-rose-600" />
               </button>
@@ -537,7 +527,9 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                   key={`${item.accountId || 'unassigned'}::${item.phoneNumber}`}
                   type="button"
                   onClick={() => {
+                    shouldStickToBottomRef.current = true;
                     setSelectedSession(item);
+                    setReplyingTo(null);
                     setShowCollectedVariables(false);
                   }}
                   className={`w-full text-left p-3 hover:bg-slate-50 transition-colors flex items-start gap-3 cursor-pointer ${
@@ -658,7 +650,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                   </div>
 
                   <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                    {selectedSession.phoneNumber} · Auto-exclusão em {selectedSession.autoDeleteDays || 7} dias
+                    {selectedSession.phoneNumber} · Auto-exclusão em {selectedSession.autoDeleteDays || 17} dias
                   </p>
                 </div>
               </div>
@@ -772,7 +764,15 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
             )}
 
             {/* Messages Transcript (with photos, audios, documents, texts) */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-3.5 bg-[#efeae2]/70">
+            <div
+              ref={chatScrollRef}
+              onScroll={() => {
+                const element = chatScrollRef.current;
+                if (!element) return;
+                shouldStickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+              }}
+              className="flex-1 overflow-y-auto p-6 space-y-3.5 bg-[#efeae2]/70"
+            >
               {selectedSession.history.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 max-w-sm mx-auto bg-white/80 rounded-2xl border border-slate-200/80">
                   <MessageSquare className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -801,7 +801,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                   return (
                     <div
                       key={msg.id}
-                      className={`flex ${isUser ? 'justify-start' : 'justify-end'}`}
+                      className={`group flex ${isUser ? 'justify-start' : 'justify-end'}`}
                     >
                       <div
                         className={`max-w-[75%] rounded-2xl px-4 py-2.5 shadow-xs relative text-xs ${
@@ -819,6 +819,13 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                           </span>
                           <span>{msg.timestamp}</span>
                         </div>
+
+                        {msg.replyTo && (
+                          <div className="mb-2 rounded-lg border-l-2 border-emerald-500 bg-slate-100/80 px-2.5 py-1.5 text-[10px] text-slate-600">
+                            <p className="font-bold">{msg.replyTo.sender === 'user' ? 'Cliente' : 'Você'}</p>
+                            <p className="truncate max-w-sm">{msg.replyTo.content || `[${msg.replyTo.type}]`}</p>
+                          </div>
+                        )}
 
                         {/* Image message */}
                         {msg.type === 'image' && msg.mediaUrl && (
@@ -881,6 +888,26 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                         {msg.content && msg.type !== 'audio' && (
                           <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                         )}
+
+                        <div className={`absolute -top-3 ${isUser ? '-right-16' : '-left-16'} hidden group-hover:flex items-center rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden`}>
+                          <button type="button" onClick={() => setReplyingTo(msg)} className="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-emerald-700" title="Responder esta mensagem">
+                            <Reply className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const copyText = msg.content || msg.caption || msg.mediaUrl || msg.filename || '';
+                              if (!copyText) return;
+                              await navigator.clipboard.writeText(copyText);
+                              setCopiedMessageId(msg.id);
+                              window.setTimeout(() => setCopiedMessageId(null), 1500);
+                            }}
+                            className="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-blue-700"
+                            title={copiedMessageId === msg.id ? 'Copiado!' : 'Copiar mensagem'}
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -901,6 +928,16 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
 
             {/* Agent Live Reply Input Box */}
             <div className="p-4 bg-white border-t border-slate-200 shrink-0 space-y-2">
+              {replyingTo && (
+                <div className="flex items-center gap-3 rounded-lg border-l-4 border-emerald-500 bg-slate-50 px-3 py-2 text-[11px]">
+                  <Reply className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-emerald-800">Respondendo a {replyingTo.sender === 'user' ? 'Cliente' : 'esta mensagem'}</p>
+                    <p className="truncate text-slate-600">{replyingTo.content || replyingTo.caption || `[${replyingTo.type}]`}</p>
+                  </div>
+                  <button type="button" onClick={() => setReplyingTo(null)} className="p-1 text-slate-500 hover:text-slate-900" title="Cancelar resposta"><X className="w-4 h-4" /></button>
+                </div>
+              )}
               {/* Window Warning if Closed */}
               {!getWindowInfo(selectedSession).isOpen && (
                 <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] flex items-center gap-2">
