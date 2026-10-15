@@ -100,7 +100,7 @@ export const LogsViewer: React.FC<LogsViewerProps> = ({ activeAccountId, activeA
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-slate-800" />
-              <h3 className="text-sm font-bold text-slate-900">Logs da API Meta</h3>
+              <h3 className="text-sm font-bold text-slate-900">Logs de Integrações</h3>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -402,12 +402,12 @@ export const LogsViewer: React.FC<LogsViewerProps> = ({ activeAccountId, activeA
                 </div>
               </div>
 
-              {/* Request Payload Sent to Meta */}
+              {/* Request payload sent to an integration */}
               {selectedLog.requestPayload && (
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                   <div className="px-4 py-2.5 bg-slate-100/70 border-b border-slate-200 flex items-center justify-between">
                     <span className="font-bold text-slate-700 text-xs">
-                      1. Payload Enviado para a Meta (Requisição)
+                      1. Payload Enviado (Requisição)
                     </span>
                     <button
                       type="button"
@@ -433,12 +433,12 @@ export const LogsViewer: React.FC<LogsViewerProps> = ({ activeAccountId, activeA
                 </div>
               )}
 
-              {/* Response Returned by Meta */}
+              {/* Response returned by an integration */}
               {selectedLog.responseBody && (
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                   <div className="px-4 py-2.5 bg-slate-100/70 border-b border-slate-200 flex items-center justify-between">
                     <span className="font-bold text-slate-700 text-xs">
-                      2. Resposta Bruta Retornada pela Meta API
+                      2. Resposta Bruta da Integração
                     </span>
                     <button
                       type="button"

@@ -172,7 +172,7 @@ export const MetaConversionsSettings: React.FC<Props> = ({ accountId, accountNam
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
           <p className="font-bold flex items-center gap-2"><ShieldCheck className="w-4 h-4" />Atribuição de anúncios do WhatsApp</p>
           <p className="mt-1 leading-relaxed">O ID do anúncio identifica a campanha, mas a atribuição da compra usa o <code>ctwa_clid</code> recebido no webhook do clique. O FluxoZap passa a capturá-lo automaticamente para os novos leads.</p>
-          <p className="mt-2 leading-relaxed"><strong>Conta de anúncios:</strong> usada para localizar e administrar o Pixel. <strong>Envio do Purchase:</strong> feito para <code>/{'{PIXEL_ID}'}/events</code> usando o token; o BM ID não é enviado no evento.</p>
+          <p className="mt-2 leading-relaxed"><strong>Conta de anúncios:</strong> usada para localizar o Pixel e descobrir automaticamente o <code>page_id</code> do anúncio. <strong>Envio do Purchase:</strong> feito para <code>/{'{DATASET_ID}'}/events</code> com <code>ctwa_clid + page_id</code>; o BM ID não é enviado no evento.</p>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">

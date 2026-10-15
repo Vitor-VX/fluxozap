@@ -51,34 +51,57 @@ const conversionLabel: Record<string, { label: string; classes: string }> = {
 
 export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, onOpenSettings }) => {
   const [tab, setTab] = useState<'campaigns' | 'sales'>('campaigns');
-  const [datePreset, setDatePreset] = useState(() => readStoredPreference(ADS_DATE_PRESET_KEY, validDatePresets, 'last_30d'));
+  const [datePreset, setDatePreset] = useState<string>(() => readStoredPreference<string>(ADS_DATE_PRESET_KEY, validDatePresets, 'last_30d'));
   const [ads, setAds] = useState<any>(null);
   const [salesData, setSalesData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMoreCampaigns, setLoadingMoreCampaigns] = useState(false);
+  const [loadingMoreSales, setLoadingMoreSales] = useState(false);
   const [error, setError] = useState('');
   const [updatingCampaign, setUpdatingCampaign] = useState<string | null>(null);
   const [retryingSale, setRetryingSale] = useState<string | null>(null);
   const [campaignFilter, setCampaignFilter] = useState<'all' | 'active' | 'inactive'>(() => readStoredPreference(ADS_CAMPAIGN_FILTER_KEY, validCampaignFilters, 'all'));
-  const [visibleCampaigns, setVisibleCampaigns] = useState(PAGE_SIZE);
-  const [visibleSales, setVisibleSales] = useState(PAGE_SIZE);
 
-  const load = async () => {
+  const loadCampaigns = async (append = false) => {
     if (!accountId) return;
-    setLoading(true); setError('');
+    append ? setLoadingMoreCampaigns(true) : setLoading(true);
+    setError('');
     try {
-      const [adsResponse, salesResponse] = await Promise.all([
-        fetch(`/api/facebook-ads/dashboard?accountId=${encodeURIComponent(accountId)}&datePreset=${encodeURIComponent(datePreset)}`),
-        fetch(`/api/meta-capi/sales?accountId=${encodeURIComponent(accountId)}`),
-      ]);
-      const [adsPayload, salesPayload] = await Promise.all([adsResponse.json(), salesResponse.json()]);
-      if (!adsResponse.ok) throw new Error(adsPayload.error || 'Não foi possível consultar o Facebook Ads.');
-      if (!salesResponse.ok) throw new Error(salesPayload.error || 'Não foi possível carregar as vendas.');
-      setAds(adsPayload); setSalesData(salesPayload);
+      const params = new URLSearchParams({ accountId, datePreset, campaignFilter, limit: String(PAGE_SIZE) });
+      if (append && ads?.paging?.nextCursor) params.set('after', ads.paging.nextCursor);
+      const response = await fetch(`/api/facebook-ads/dashboard?${params.toString()}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Não foi possível consultar o Facebook Ads.');
+      setAds((current: any) => append ? {
+        ...current, ...payload,
+        account: current?.account,
+        totals: current?.totals,
+        campaigns: [...(current?.campaigns || []), ...(payload.campaigns || [])],
+      } : payload);
     } catch (err: any) { setError(err.message); }
-    finally { setLoading(false); }
+    finally { append ? setLoadingMoreCampaigns(false) : setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [accountId, datePreset]);
+  const loadSales = async (append = false) => {
+    if (!accountId) return;
+    append ? setLoadingMoreSales(true) : setLoading(true);
+    setError('');
+    try {
+      const page = append ? Number(salesData?.pagination?.nextPage || 1) : 1;
+      const response = await fetch(`/api/meta-capi/sales?accountId=${encodeURIComponent(accountId)}&page=${page}&limit=${PAGE_SIZE}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Não foi possível carregar as vendas.');
+      setSalesData((current: any) => append ? { ...payload, sales: [...(current?.sales || []), ...(payload.sales || [])] } : payload);
+    } catch (err: any) { setError(err.message); }
+    finally { append ? setLoadingMoreSales(false) : setLoading(false); }
+  };
+
+  const refreshCurrent = () => tab === 'campaigns' ? loadCampaigns(false) : loadSales(false);
+
+  useEffect(() => { setAds(null); loadCampaigns(false); }, [accountId, datePreset, campaignFilter]);
+  useEffect(() => {
+    if (tab === 'sales') { setSalesData(null); loadSales(false); }
+  }, [accountId, tab]);
 
   useEffect(() => {
     try { window.localStorage.setItem(ADS_DATE_PRESET_KEY, datePreset); } catch { /* storage unavailable */ }
@@ -87,13 +110,6 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
   useEffect(() => {
     try { window.localStorage.setItem(ADS_CAMPAIGN_FILTER_KEY, campaignFilter); } catch { /* storage unavailable */ }
   }, [campaignFilter]);
-
-  useEffect(() => {
-    setVisibleCampaigns(PAGE_SIZE);
-    setVisibleSales(PAGE_SIZE);
-  }, [accountId]);
-
-  useEffect(() => { setVisibleCampaigns(PAGE_SIZE); }, [campaignFilter, datePreset]);
 
   const toggleCampaign = async (campaign: Campaign) => {
     if (!accountId) return;
@@ -120,7 +136,7 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || data.error || 'Não foi possível reenviar.');
-      await load();
+      await loadSales(false);
     } catch (err: any) { setError(err.message); }
     finally { setRetryingSale(null); }
   };
@@ -129,14 +145,6 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
   const totals: Metrics | null = ads?.totals || null;
   const currency = ads?.account?.currency || 'BRL';
   const sales: Sale[] = salesData?.sales || [];
-  const filteredCampaigns = useMemo(() => campaigns.filter((campaign) => {
-    const isActive = campaign.status === 'ACTIVE' && campaign.effective_status === 'ACTIVE';
-    if (campaignFilter === 'active') return isActive;
-    if (campaignFilter === 'inactive') return !isActive;
-    return true;
-  }), [campaigns, campaignFilter]);
-  const displayedCampaigns = filteredCampaigns.slice(0, visibleCampaigns);
-  const displayedSales = sales.slice(0, visibleSales);
   const revenueText = useMemo(() => Object.entries(salesData?.summary?.revenueByCurrency || {}).map(([code, value]) => metricCurrency(Number(value), code)).join(' + ') || metricCurrency(0), [salesData]);
 
   if (!accountId) return <div className="h-full grid place-items-center text-sm text-slate-500">Selecione uma linha do WhatsApp.</div>;
@@ -153,7 +161,7 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
             <select value={datePreset} onChange={(event) => setDatePreset(event.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">
               <option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="last_7d">Últimos 7 dias</option><option value="last_14d">Últimos 14 dias</option><option value="last_30d">Últimos 30 dias</option><option value="this_month">Este mês</option><option value="last_month">Mês passado</option><option value="maximum">Todo o período</option>
             </select>
-            <button type="button" onClick={load} disabled={loading} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-700"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+            <button type="button" onClick={refreshCurrent} disabled={loading} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-700"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
           </div>
         </div>
 
@@ -186,7 +194,7 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
                   <div>
                     <p className="text-xs font-bold text-slate-800">Filtrar campanhas</p>
-                    <p className="text-[10px] text-slate-500">{filteredCampaigns.length} de {campaigns.length} campanhas</p>
+                    <p className="text-[10px] text-slate-500">{campaigns.length} campanhas carregadas sob demanda</p>
                   </div>
                   <div className="inline-flex rounded-lg bg-slate-100 p-1">
                     {([
@@ -198,9 +206,9 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
                 </div>
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
                   <div className="max-h-[560px] overflow-auto"><table className="w-full min-w-[980px] text-left text-xs"><thead className="sticky top-0 z-10 bg-slate-50 text-[10px] uppercase text-slate-500 shadow-[0_1px_0_0_#e2e8f0]"><tr><th className="p-3">Campanha</th><th className="p-3">Status</th><th className="p-3 text-right">Gasto</th><th className="p-3 text-right">Impressões</th><th className="p-3 text-right">Cliques</th><th className="p-3 text-right">CPC</th><th className="p-3 text-right">CPM</th><th className="p-3 text-right">Compras</th><th className="p-3 text-right">ROAS</th><th className="p-3 text-center">Ligada</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100">{displayedCampaigns.map((campaign) => { const isEffectivelyActive = campaign.effective_status === 'ACTIVE'; const isEnabled = campaign.status === 'ACTIVE'; return <tr key={campaign.id} className="hover:bg-slate-50"><td className="p-3"><p className="font-bold text-slate-900">{campaign.name}</p><p className="font-mono text-[10px] text-slate-400">{campaign.id} · {campaign.objective || 'sem objetivo'}</p></td><td className="p-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${isEffectivelyActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>{campaign.effective_status}</span></td><td className="p-3 text-right">{metricCurrency(campaign.metrics.spend, currency)}</td><td className="p-3 text-right">{integer(campaign.metrics.impressions)}</td><td className="p-3 text-right">{integer(campaign.metrics.clicks)}</td><td className="p-3 text-right">{metricCurrency(campaign.metrics.cpc, currency)}</td><td className="p-3 text-right">{metricCurrency(campaign.metrics.cpm, currency)}</td><td className="p-3 text-right font-bold">{integer(campaign.metrics.purchases)}</td><td className="p-3 text-right font-bold">{campaign.metrics.roas.toFixed(2)}x</td><td className="p-3"><div className="flex justify-center"><button type="button" role="switch" aria-checked={isEnabled} aria-label={`${isEnabled ? 'Pausar' : 'Ativar'} campanha ${campaign.name}`} onClick={() => toggleCampaign(campaign)} disabled={updatingCampaign === campaign.id} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${isEnabled ? 'bg-emerald-500' : 'bg-slate-300'}`} title={isEnabled ? 'Pausar campanha' : 'Ativar campanha'}><span className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow-sm transition-transform ${isEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}>{updatingCampaign === campaign.id && <Loader2 className="h-3 w-3 animate-spin text-slate-500" />}</span></button></div></td></tr>; })}</tbody></table></div>
-                  {!loading && filteredCampaigns.length === 0 && <div className="p-10 text-center text-sm text-slate-500">{campaigns.length === 0 ? 'Nenhuma campanha retornada para esta conta.' : 'Nenhuma campanha corresponde a este filtro.'}</div>}
-                  {visibleCampaigns < filteredCampaigns.length && <div className="border-t border-slate-100 p-3 text-center"><button type="button" onClick={() => setVisibleCampaigns((current) => current + PAGE_SIZE)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">Mostrar mais 10 <span className="font-normal text-slate-400">({filteredCampaigns.length - visibleCampaigns} restantes)</span></button></div>}
+                    <tbody className="divide-y divide-slate-100">{campaigns.map((campaign) => { const isEffectivelyActive = campaign.effective_status === 'ACTIVE'; const isEnabled = campaign.status === 'ACTIVE'; return <tr key={campaign.id} className="hover:bg-slate-50"><td className="p-3"><p className="font-bold text-slate-900">{campaign.name}</p><p className="font-mono text-[10px] text-slate-400">{campaign.id} · {campaign.objective || 'sem objetivo'}</p></td><td className="p-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${isEffectivelyActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>{campaign.effective_status}</span></td><td className="p-3 text-right">{metricCurrency(campaign.metrics.spend, currency)}</td><td className="p-3 text-right">{integer(campaign.metrics.impressions)}</td><td className="p-3 text-right">{integer(campaign.metrics.clicks)}</td><td className="p-3 text-right">{metricCurrency(campaign.metrics.cpc, currency)}</td><td className="p-3 text-right">{metricCurrency(campaign.metrics.cpm, currency)}</td><td className="p-3 text-right font-bold">{integer(campaign.metrics.purchases)}</td><td className="p-3 text-right font-bold">{campaign.metrics.roas.toFixed(2)}x</td><td className="p-3"><div className="flex justify-center"><button type="button" role="switch" aria-checked={isEnabled} aria-label={`${isEnabled ? 'Pausar' : 'Ativar'} campanha ${campaign.name}`} onClick={() => toggleCampaign(campaign)} disabled={updatingCampaign === campaign.id} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${isEnabled ? 'bg-emerald-500' : 'bg-slate-300'}`} title={isEnabled ? 'Pausar campanha' : 'Ativar campanha'}><span className={`absolute top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white shadow-sm transition-transform ${isEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}>{updatingCampaign === campaign.id && <Loader2 className="h-3 w-3 animate-spin text-slate-500" />}</span></button></div></td></tr>; })}</tbody></table></div>
+                  {!loading && campaigns.length === 0 && <div className="p-10 text-center text-sm text-slate-500">Nenhuma campanha retornada para este filtro.</div>}
+                  {ads?.paging?.hasMore && <div className="border-t border-slate-100 p-3 text-center"><button type="button" onClick={() => loadCampaigns(true)} disabled={loadingMoreCampaigns} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60">{loadingMoreCampaigns ? <Loader2 className="mr-2 inline h-3.5 w-3.5 animate-spin" /> : null}Buscar mais 10 na Meta</button></div>}
                 </div>
               </>
             )}
@@ -217,8 +225,8 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
                   ].map(([label, value]) => <div key={label} className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-[10px] font-semibold uppercase text-slate-400">{label}</p><p className="mt-1 text-base font-bold text-slate-900">{value}</p></div>)}
                 </div>
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs"><div className="max-h-[560px] overflow-auto"><table className="w-full min-w-[900px] text-left text-xs"><thead className="sticky top-0 z-10 bg-slate-50 text-[10px] uppercase text-slate-500 shadow-[0_1px_0_0_#e2e8f0]"><tr><th className="p-3">Cliente/Venda</th><th className="p-3">Pagamento</th><th className="p-3">Anúncio</th><th className="p-3">Conversão Meta</th><th className="p-3">Detalhes</th><th className="p-3"></th></tr></thead><tbody className="divide-y divide-slate-100">
-                  {displayedSales.map((sale) => { const badge = conversionLabel[sale.conversion.status] || conversionLabel.not_applicable; return <tr key={sale.externalId} className="align-top hover:bg-slate-50"><td className="p-3"><p className="font-bold text-slate-900">{sale.customer.name || sale.customer.phoneNumber}</p><p className="font-mono text-[10px] text-slate-400">{sale.customer.phoneNumber}<br />{sale.externalId}</p></td><td className="p-3"><p className="font-bold">{metricCurrency(sale.amount, sale.currency)}</p><p className="text-[10px] text-slate-500">{sale.method} · {sale.status}</p></td><td className="p-3"><p className="font-mono text-[10px]">{sale.attribution.adId || 'Sem anúncio'}</p><p className={`text-[10px] ${sale.attribution.ctwaClid ? 'text-emerald-700' : 'text-amber-700'}`}>{sale.attribution.ctwaClid ? 'ctwa_clid capturado' : 'sem ctwa_clid'}</p></td><td className="p-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${badge.classes}`}>{badge.label}</span>{sale.conversion.sentAt && <p className="mt-1 text-[10px] text-slate-500">Enviada: {new Date(sale.conversion.sentAt).toLocaleString('pt-BR')}</p>}{sale.conversion.eventTime && <p className="text-[10px] text-slate-500">Evento: {new Date(sale.conversion.eventTime).toLocaleString('pt-BR')}</p>}</td><td className="max-w-xs p-3"><p className="break-words text-[10px] text-rose-700">{sale.conversion.error}</p>{sale.conversion.eventId && <p className="break-all font-mono text-[9px] text-slate-400">event_id: {sale.conversion.eventId}</p>}{sale.conversion.response?.events_received !== undefined && <p className="text-[10px] text-emerald-700">events_received: {sale.conversion.response.events_received}</p>}{sale.conversion.attempts && sale.conversion.attempts.length > 1 && <p className="text-[10px] text-amber-700">{sale.conversion.attempts.length} tentativas registradas</p>}</td><td className="p-3">{['failed', 'not_attributed', 'pending'].includes(sale.conversion.status) && sale.status === 'confirmed' && <button type="button" onClick={() => retryConversion(sale)} disabled={retryingSale === sale.externalId} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600" title="Reenviar conversão">{retryingSale === sale.externalId ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}</button>}</td></tr>; })}
-                </tbody></table></div>{!loading && sales.length === 0 && <div className="p-10 text-center text-sm text-slate-500">Nenhuma cobrança registrada nesta linha.</div>}{visibleSales < sales.length && <div className="border-t border-slate-100 p-3 text-center"><button type="button" onClick={() => setVisibleSales((current) => current + PAGE_SIZE)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">Mostrar mais 10 <span className="font-normal text-slate-400">({sales.length - visibleSales} restantes)</span></button></div>}</div>
+                  {sales.map((sale) => { const badge = conversionLabel[sale.conversion.status] || conversionLabel.not_applicable; return <tr key={sale.externalId} className="align-top hover:bg-slate-50"><td className="p-3"><p className="font-bold text-slate-900">{sale.customer.name || sale.customer.phoneNumber}</p><p className="font-mono text-[10px] text-slate-400">{sale.customer.phoneNumber}<br />{sale.externalId}</p></td><td className="p-3"><p className="font-bold">{metricCurrency(sale.amount, sale.currency)}</p><p className="text-[10px] text-slate-500">{sale.method} · {sale.status}</p></td><td className="p-3"><p className="font-mono text-[10px]">{sale.attribution.adId || 'Sem anúncio'}</p><p className={`text-[10px] ${sale.attribution.ctwaClid ? 'text-emerald-700' : 'text-amber-700'}`}>{sale.attribution.ctwaClid ? 'ctwa_clid capturado' : 'sem ctwa_clid'}</p></td><td className="p-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${badge.classes}`}>{badge.label}</span>{sale.conversion.sentAt && <p className="mt-1 text-[10px] text-slate-500">Enviada: {new Date(sale.conversion.sentAt).toLocaleString('pt-BR')}</p>}{sale.conversion.eventTime && <p className="text-[10px] text-slate-500">Evento: {new Date(sale.conversion.eventTime).toLocaleString('pt-BR')}</p>}</td><td className="max-w-xs p-3"><p className="break-words text-[10px] text-rose-700">{sale.conversion.error}</p>{sale.conversion.eventId && <p className="break-all font-mono text-[9px] text-slate-400">event_id: {sale.conversion.eventId}</p>}{sale.conversion.response?.events_received !== undefined && <p className="text-[10px] text-emerald-700">events_received: {sale.conversion.response.events_received}</p>}{sale.conversion.attempts && sale.conversion.attempts.length > 1 && <p className="text-[10px] text-amber-700">{sale.conversion.attempts.length} tentativas registradas</p>}</td><td className="p-3">{['failed', 'not_attributed', 'pending'].includes(sale.conversion.status) && sale.status === 'confirmed' && <button type="button" onClick={() => retryConversion(sale)} disabled={retryingSale === sale.externalId} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600" title="Reenviar conversão">{retryingSale === sale.externalId ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}</button>}</td></tr>; })}
+                </tbody></table></div>{!loading && sales.length === 0 && <div className="p-10 text-center text-sm text-slate-500">Nenhuma cobrança registrada nesta linha.</div>}{salesData?.pagination?.hasMore && <div className="border-t border-slate-100 p-3 text-center"><button type="button" onClick={() => loadSales(true)} disabled={loadingMoreSales} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60">{loadingMoreSales ? <Loader2 className="mr-2 inline h-3.5 w-3.5 animate-spin" /> : null}Buscar mais 10 vendas</button></div>}</div>
               </>
             )}
           </>

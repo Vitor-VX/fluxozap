@@ -19,6 +19,7 @@ export interface WhatsAppAccount {
   wabaId?: string; // WhatsApp Business Account ID
   accessToken?: string; // Token específico (ou usa o global se vazio)
   verifyToken?: string;
+  ctwaDatasetId?: string; // Dataset de eventos CTWA vinculado à WABA
   isDefault?: boolean;
   color?: string; // Cor temática para crachá (emerald, blue, purple, amber, indigo, etc.)
   flow?: FlowDefinition; // Fluxo exclusivo deste número de WhatsApp
@@ -239,7 +240,7 @@ export interface FlowDefinition {
 export interface ApiLogEntry {
   id: string;
   timestamp: string;
-  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'ads_management' | 'error';
+  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'ads_management' | 'ads_insights' | 'dataset' | 'xpag' | 'storage' | 'integration' | 'error';
   direction: 'outbound' | 'inbound';
   endpoint: string;
   accountId?: string;

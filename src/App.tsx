@@ -11,6 +11,8 @@ import {
   BadgeDollarSign,
   Activity,
   BarChart3,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { FlowEditor } from './components/flow/FlowEditor';
 import { MetaApiSettings } from './components/settings/MetaApiSettings';
@@ -33,6 +35,18 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
   const [hasErrors, setHasErrors] = useState(false);
   const [isMongoConnected, setIsMongoConnected] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = window.localStorage.getItem('fluxozap:theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch { return 'light'; }
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try { window.localStorage.setItem('fluxozap:theme', theme); } catch { /* storage unavailable */ }
+  }, [theme]);
 
   // WhatsApp accounts state
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
@@ -189,7 +203,7 @@ export default function App() {
             }`}
           >
             <Terminal className="w-3.5 h-3.5 text-amber-600" />
-            <span>Logs da API</span>
+            <span>Logs de Integrações</span>
             {hasErrors && (
               <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" title="Erros recentes detectados" />
             )}
@@ -277,6 +291,15 @@ export default function App() {
 
         {/* Zone 3: Primary Action */}
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+            className="grid h-8 w-8 place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+            title={theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
+            aria-label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
           {activeTab !== 'conversations' ? (
             <button
               type="button"

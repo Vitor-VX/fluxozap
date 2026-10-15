@@ -1,5 +1,199 @@
 [
   {
+    "id": "log_1792092378975_mfzwk",
+    "timestamp": "2026-10-15T19:26:18.975Z",
+    "type": "dataset",
+    "direction": "outbound",
+    "endpoint": "GET /v24.0/1114306394657303/dataset",
+    "accountId": "acc_meta_primary",
+    "accountName": "Linha Principal Meta",
+    "phoneNumberId": "1409320238929366",
+    "httpStatus": 200,
+    "success": true,
+    "responseBody": {
+      "data": [
+        {
+          "id": "1356910809660849",
+          "name": "FluxoZap CTWA"
+        }
+      ]
+    }
+  },
+  {
+    "id": "log_1792092376211_cl1fd",
+    "timestamp": "2026-10-15T19:26:16.211Z",
+    "type": "ads_insights",
+    "direction": "outbound",
+    "endpoint": "GET /act_982623320605837/campaigns",
+    "accountId": "acc_meta_primary",
+    "messageType": "campaigns_active",
+    "httpStatus": 200,
+    "success": true,
+    "requestPayload": {
+      "datePreset": "today",
+      "campaignFilter": "active",
+      "limit": 10
+    },
+    "responseBody": {
+      "returnedCampaigns": 7,
+      "hasMore": false
+    }
+  },
+  {
+    "id": "log_1792092346531_9afy2",
+    "timestamp": "2026-10-15T19:25:46.531Z",
+    "type": "dataset",
+    "direction": "outbound",
+    "endpoint": "GET /v24.0/1114306394657303/dataset",
+    "accountId": "acc_meta_primary",
+    "accountName": "Linha Principal Meta",
+    "phoneNumberId": "1409320238929366",
+    "httpStatus": 200,
+    "success": true,
+    "responseBody": {
+      "data": [
+        {
+          "id": "1356910809660849",
+          "name": "FluxoZap CTWA"
+        }
+      ]
+    }
+  },
+  {
+    "id": "log_1792092340883_n00ux",
+    "timestamp": "2026-10-15T19:25:40.883Z",
+    "type": "ads_insights",
+    "direction": "outbound",
+    "endpoint": "GET /act_982623320605837/campaigns",
+    "accountId": "acc_meta_primary",
+    "messageType": "campaigns_active",
+    "httpStatus": 200,
+    "success": true,
+    "requestPayload": {
+      "datePreset": "today",
+      "campaignFilter": "active",
+      "limit": 10
+    },
+    "responseBody": {
+      "returnedCampaigns": 7,
+      "hasMore": false
+    }
+  },
+  {
+    "id": "log_1792091713686_yu50c",
+    "timestamp": "2026-10-15T19:15:13.686Z",
+    "type": "dataset",
+    "direction": "outbound",
+    "endpoint": "GET /v24.0/1114306394657303/dataset",
+    "accountId": "acc_meta_primary",
+    "accountName": "Linha Principal Meta",
+    "phoneNumberId": "1409320238929366",
+    "httpStatus": 200,
+    "success": true,
+    "responseBody": {
+      "data": [
+        {
+          "id": "1356910809660849",
+          "name": "FluxoZap CTWA"
+        }
+      ]
+    }
+  },
+  {
+    "id": "log_1792091705511_ptnc3",
+    "timestamp": "2026-10-15T19:15:05.511Z",
+    "type": "dataset",
+    "direction": "outbound",
+    "endpoint": "POST /v24.0/1114306394657303/dataset",
+    "accountId": "acc_meta_primary",
+    "accountName": "Linha Principal Meta",
+    "phoneNumberId": "1409320238929366",
+    "messageType": "create_ctwa_dataset",
+    "httpStatus": 200,
+    "success": true,
+    "requestPayload": {
+      "dataset_name": "FluxoZap CTWA"
+    },
+    "responseBody": {
+      "id": "1356910809660849"
+    }
+  },
+  {
+    "id": "log_1792091691309_x9ix2",
+    "timestamp": "2026-10-15T19:14:51.309Z",
+    "type": "dataset",
+    "direction": "outbound",
+    "endpoint": "GET /v24.0/1114306394657303/dataset",
+    "accountId": "acc_meta_primary",
+    "accountName": "Linha Principal Meta",
+    "phoneNumberId": "1409320238929366",
+    "httpStatus": 200,
+    "success": true,
+    "responseBody": {
+      "data": []
+    }
+  },
+  {
+    "id": "log_1792091683695_mjoyf",
+    "timestamp": "2026-10-15T19:14:43.695Z",
+    "type": "ads_insights",
+    "direction": "outbound",
+    "endpoint": "GET /act_982623320605837/campaigns",
+    "accountId": "acc_meta_primary",
+    "messageType": "campaigns_active",
+    "httpStatus": 200,
+    "success": true,
+    "requestPayload": {
+      "datePreset": "today",
+      "campaignFilter": "active",
+      "limit": 10
+    },
+    "responseBody": {
+      "returnedCampaigns": 7,
+      "hasMore": false
+    }
+  },
+  {
+    "id": "log_1792091681243_f9o8d",
+    "timestamp": "2026-10-15T19:14:41.243Z",
+    "type": "ads_insights",
+    "direction": "outbound",
+    "endpoint": "GET /act_982623320605837/campaigns",
+    "accountId": "acc_meta_primary",
+    "messageType": "campaigns_active",
+    "httpStatus": 200,
+    "success": true,
+    "requestPayload": {
+      "datePreset": "last_30d",
+      "campaignFilter": "active",
+      "limit": 10
+    },
+    "responseBody": {
+      "returnedCampaigns": 7,
+      "hasMore": false
+    }
+  },
+  {
+    "id": "log_1792091670817_41aoo",
+    "timestamp": "2026-10-15T19:14:30.817Z",
+    "type": "ads_insights",
+    "direction": "outbound",
+    "endpoint": "GET /act_982623320605837/campaigns",
+    "accountId": "acc_meta_primary",
+    "messageType": "campaigns_all",
+    "httpStatus": 200,
+    "success": true,
+    "requestPayload": {
+      "datePreset": "last_30d",
+      "campaignFilter": "all",
+      "limit": 10
+    },
+    "responseBody": {
+      "returnedCampaigns": 10,
+      "hasMore": true
+    }
+  },
+  {
     "id": "log_1792030449012_r1155",
     "timestamp": "2026-10-15T02:14:09.012Z",
     "type": "ads_management",
@@ -8545,452 +8739,6 @@
                     "conversation": {
                       "id": "7fdac9ac0c0e609478c457aa768be35b",
                       "expiration_timestamp": "1792625340",
-                      "origin": {
-                        "type": "referral_conversion"
-                      }
-                    },
-                    "pricing": {
-                      "billable": false,
-                      "pricing_model": "PMP",
-                      "category": "referral_conversion",
-                      "type": "free_entry_point"
-                    }
-                  }
-                ]
-              },
-              "field": "messages"
-            }
-          ]
-        }
-      ]
-    }
-  },
-  {
-    "id": "log_1792020674145_cyaws",
-    "timestamp": "2026-10-14T23:31:14.145Z",
-    "type": "outgoing_message",
-    "direction": "outbound",
-    "endpoint": "POST /v21.0/1409320238929366/messages",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "recipient": "5217411048557",
-    "messageType": "text",
-    "httpStatus": 200,
-    "success": true,
-    "requestPayload": {
-      "messaging_product": "whatsapp",
-      "recipient_type": "individual",
-      "to": "5217411048557",
-      "type": "text",
-      "text": {
-        "preview_url": false,
-        "body": "734180009404877741"
-      }
-    },
-    "responseBody": {
-      "messaging_product": "whatsapp",
-      "contacts": [
-        {
-          "input": "5217411048557",
-          "wa_id": "5217411048557"
-        }
-      ],
-      "messages": [
-        {
-          "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEkM3OTI3RDNGRUVGREJGMDE0MwA="
-        }
-      ]
-    }
-  },
-  {
-    "id": "log_1792020674016_d6e9z",
-    "timestamp": "2026-10-14T23:31:14.016Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook (status da mensagem)",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "recipient": "5217411048557",
-    "success": true,
-    "requestPayload": {
-      "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEkI5QzE1MEMwQTE4Q0QyRENCRgA=",
-      "status": "delivered",
-      "timestamp": "1792020672",
-      "recipient_id": "5217411048557",
-      "recipient_user_id": "MX.1559771672494627",
-      "conversation": {
-        "id": "7fdac9ac0c0e609478c457aa768be35b",
-        "origin": {
-          "type": "referral_conversion"
-        }
-      },
-      "pricing": {
-        "billable": false,
-        "pricing_model": "PMP",
-        "category": "referral_conversion",
-        "type": "free_entry_point"
-      }
-    },
-    "metaErrorCode": null,
-    "metaErrorMessage": null,
-    "diagnosticTip": null
-  },
-  {
-    "id": "log_1792020674013_26wi6",
-    "timestamp": "2026-10-14T23:31:14.013Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "success": true,
-    "requestPayload": {
-      "object": "whatsapp_business_account",
-      "entry": [
-        {
-          "id": "1114306394657303",
-          "changes": [
-            {
-              "value": {
-                "messaging_product": "whatsapp",
-                "metadata": {
-                  "display_phone_number": "556981060125",
-                  "phone_number_id": "1409320238929366"
-                },
-                "contacts": [
-                  {
-                    "wa_id": "5217411048557",
-                    "user_id": "MX.1559771672494627"
-                  }
-                ],
-                "statuses": [
-                  {
-                    "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEkI5QzE1MEMwQTE4Q0QyRENCRgA=",
-                    "status": "delivered",
-                    "timestamp": "1792020672",
-                    "recipient_id": "5217411048557",
-                    "recipient_user_id": "MX.1559771672494627",
-                    "conversation": {
-                      "id": "7fdac9ac0c0e609478c457aa768be35b",
-                      "origin": {
-                        "type": "referral_conversion"
-                      }
-                    },
-                    "pricing": {
-                      "billable": false,
-                      "pricing_model": "PMP",
-                      "category": "referral_conversion",
-                      "type": "free_entry_point"
-                    }
-                  }
-                ]
-              },
-              "field": "messages"
-            }
-          ]
-        }
-      ]
-    }
-  },
-  {
-    "id": "log_1792020673613_tm4h7",
-    "timestamp": "2026-10-14T23:31:13.613Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook (status da mensagem)",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "recipient": "5217411048557",
-    "success": true,
-    "requestPayload": {
-      "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEjJGOUQ1NDkwMkVCN0Q2REY3NgA=",
-      "status": "delivered",
-      "timestamp": "1792020672",
-      "recipient_id": "5217411048557",
-      "recipient_user_id": "MX.1559771672494627",
-      "conversation": {
-        "id": "7fdac9ac0c0e609478c457aa768be35b",
-        "origin": {
-          "type": "referral_conversion"
-        }
-      },
-      "pricing": {
-        "billable": false,
-        "pricing_model": "PMP",
-        "category": "referral_conversion",
-        "type": "free_entry_point"
-      }
-    },
-    "metaErrorCode": null,
-    "metaErrorMessage": null,
-    "diagnosticTip": null
-  },
-  {
-    "id": "log_1792020673592_ayohm",
-    "timestamp": "2026-10-14T23:31:13.592Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "success": true,
-    "requestPayload": {
-      "object": "whatsapp_business_account",
-      "entry": [
-        {
-          "id": "1114306394657303",
-          "changes": [
-            {
-              "value": {
-                "messaging_product": "whatsapp",
-                "metadata": {
-                  "display_phone_number": "556981060125",
-                  "phone_number_id": "1409320238929366"
-                },
-                "contacts": [
-                  {
-                    "wa_id": "5217411048557",
-                    "user_id": "MX.1559771672494627"
-                  }
-                ],
-                "statuses": [
-                  {
-                    "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEjJGOUQ1NDkwMkVCN0Q2REY3NgA=",
-                    "status": "delivered",
-                    "timestamp": "1792020672",
-                    "recipient_id": "5217411048557",
-                    "recipient_user_id": "MX.1559771672494627",
-                    "conversation": {
-                      "id": "7fdac9ac0c0e609478c457aa768be35b",
-                      "origin": {
-                        "type": "referral_conversion"
-                      }
-                    },
-                    "pricing": {
-                      "billable": false,
-                      "pricing_model": "PMP",
-                      "category": "referral_conversion",
-                      "type": "free_entry_point"
-                    }
-                  }
-                ]
-              },
-              "field": "messages"
-            }
-          ]
-        }
-      ]
-    }
-  },
-  {
-    "id": "log_1792020673404_9xct4",
-    "timestamp": "2026-10-14T23:31:13.404Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook (status da mensagem)",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "recipient": "5217411048557",
-    "success": true,
-    "requestPayload": {
-      "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEkI5QzE1MEMwQTE4Q0QyRENCRgA=",
-      "status": "sent",
-      "timestamp": "1792020672",
-      "recipient_id": "5217411048557",
-      "recipient_user_id": "MX.1559771672494627",
-      "conversation": {
-        "id": "7fdac9ac0c0e609478c457aa768be35b",
-        "expiration_timestamp": "1792625340",
-        "origin": {
-          "type": "referral_conversion"
-        }
-      },
-      "pricing": {
-        "billable": false,
-        "pricing_model": "PMP",
-        "category": "referral_conversion",
-        "type": "free_entry_point"
-      }
-    },
-    "metaErrorCode": null,
-    "metaErrorMessage": null,
-    "diagnosticTip": null
-  },
-  {
-    "id": "log_1792020673398_iafb5",
-    "timestamp": "2026-10-14T23:31:13.398Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "success": true,
-    "requestPayload": {
-      "object": "whatsapp_business_account",
-      "entry": [
-        {
-          "id": "1114306394657303",
-          "changes": [
-            {
-              "value": {
-                "messaging_product": "whatsapp",
-                "metadata": {
-                  "display_phone_number": "556981060125",
-                  "phone_number_id": "1409320238929366"
-                },
-                "contacts": [
-                  {
-                    "wa_id": "5217411048557",
-                    "user_id": "MX.1559771672494627"
-                  }
-                ],
-                "statuses": [
-                  {
-                    "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEkI5QzE1MEMwQTE4Q0QyRENCRgA=",
-                    "status": "sent",
-                    "timestamp": "1792020672",
-                    "recipient_id": "5217411048557",
-                    "recipient_user_id": "MX.1559771672494627",
-                    "conversation": {
-                      "id": "7fdac9ac0c0e609478c457aa768be35b",
-                      "expiration_timestamp": "1792625340",
-                      "origin": {
-                        "type": "referral_conversion"
-                      }
-                    },
-                    "pricing": {
-                      "billable": false,
-                      "pricing_model": "PMP",
-                      "category": "referral_conversion",
-                      "type": "free_entry_point"
-                    }
-                  }
-                ]
-              },
-              "field": "messages"
-            }
-          ]
-        }
-      ]
-    }
-  },
-  {
-    "id": "log_1792020673260_t9io1",
-    "timestamp": "2026-10-14T23:31:13.260Z",
-    "type": "outgoing_message",
-    "direction": "outbound",
-    "endpoint": "POST /v21.0/1409320238929366/messages",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "recipient": "5217411048557",
-    "messageType": "text",
-    "httpStatus": 200,
-    "success": true,
-    "requestPayload": {
-      "messaging_product": "whatsapp",
-      "recipient_type": "individual",
-      "to": "5217411048557",
-      "type": "text",
-      "text": {
-        "preview_url": false,
-        "body": "Ahora te voy a pasar los datos para realizar tu aportación por transferencia SPEI: 💚\n\n🏦 Banco: STP (Sistema de Transferencias y Pagos)\n🔢 CLABE: 734180009404877741\n👤 Beneficiario: Zypher Servicos\n👤 Persona: Ximena Morales\n\nTe voy a mandar la CLABE solita aquí abajo para que puedas copiarla fácilmente y no haya ningún\nerror. 👇"
-      }
-    },
-    "responseBody": {
-      "messaging_product": "whatsapp",
-      "contacts": [
-        {
-          "input": "5217411048557",
-          "wa_id": "5217411048557"
-        }
-      ],
-      "messages": [
-        {
-          "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEjM0NEEwMENGREJBQzA5RUM5MQA="
-        }
-      ]
-    }
-  },
-  {
-    "id": "log_1792020673117_jis4d",
-    "timestamp": "2026-10-14T23:31:13.117Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook (status da mensagem)",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "recipient": "5217411048557",
-    "success": true,
-    "requestPayload": {
-      "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEkY5MzI2Q0ZBODNBMEYzNzg4NAA=",
-      "status": "delivered",
-      "timestamp": "1792020671",
-      "recipient_id": "5217411048557",
-      "recipient_user_id": "MX.1559771672494627",
-      "conversation": {
-        "id": "7fdac9ac0c0e609478c457aa768be35b",
-        "origin": {
-          "type": "referral_conversion"
-        }
-      },
-      "pricing": {
-        "billable": false,
-        "pricing_model": "PMP",
-        "category": "referral_conversion",
-        "type": "free_entry_point"
-      }
-    },
-    "metaErrorCode": null,
-    "metaErrorMessage": null,
-    "diagnosticTip": null
-  },
-  {
-    "id": "log_1792020673112_vsz98",
-    "timestamp": "2026-10-14T23:31:13.112Z",
-    "type": "incoming_webhook",
-    "direction": "inbound",
-    "endpoint": "POST /api/webhook",
-    "accountId": "acc_meta_primary",
-    "accountName": "Linha Principal Meta",
-    "phoneNumberId": "1409320238929366",
-    "success": true,
-    "requestPayload": {
-      "object": "whatsapp_business_account",
-      "entry": [
-        {
-          "id": "1114306394657303",
-          "changes": [
-            {
-              "value": {
-                "messaging_product": "whatsapp",
-                "metadata": {
-                  "display_phone_number": "556981060125",
-                  "phone_number_id": "1409320238929366"
-                },
-                "contacts": [
-                  {
-                    "wa_id": "5217411048557",
-                    "user_id": "MX.1559771672494627"
-                  }
-                ],
-                "statuses": [
-                  {
-                    "id": "wamid.HBgNNTIxNzQxMTA0ODU1NxUCABEYEkY5MzI2Q0ZBODNBMEYzNzg4NAA=",
-                    "status": "delivered",
-                    "timestamp": "1792020671",
-                    "recipient_id": "5217411048557",
-                    "recipient_user_id": "MX.1559771672494627",
-                    "conversation": {
-                      "id": "7fdac9ac0c0e609478c457aa768be35b",
                       "origin": {
                         "type": "referral_conversion"
                       }

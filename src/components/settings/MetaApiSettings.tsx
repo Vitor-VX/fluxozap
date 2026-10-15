@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Terminal,
   ShieldAlert,
+  Database,
 } from 'lucide-react';
 import { MetaConfig } from '../../types/flow';
 
@@ -49,6 +50,10 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs, on
   } | null>(null);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [activeAccountName, setActiveAccountName] = useState('');
+  const [datasetName, setDatasetName] = useState('FluxoZap CTWA');
+  const [ctwaDataset, setCtwaDataset] = useState<{ id: string; name?: string } | null>(null);
+  const [datasetLoading, setDatasetLoading] = useState(false);
+  const [datasetResult, setDatasetResult] = useState<{ success: boolean; message: string } | null>(null);
   const activeAccountRef = useRef(activeAccountId);
 
   const webhookUrl = `${window.location.origin}/api/webhook`;
@@ -77,6 +82,45 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs, on
     }
   };
 
+  const fetchCtwaDataset = async (silent = false) => {
+    if (!activeAccountId) return;
+    if (!silent) setDatasetLoading(true);
+    setDatasetResult(null);
+    try {
+      const res = await fetch(`/api/config/ctwa-dataset?accountId=${encodeURIComponent(activeAccountId)}`);
+      const data = await res.json();
+      if (activeAccountRef.current !== activeAccountId) return;
+      if (!res.ok) throw new Error(data.error || 'Não foi possível consultar o Dataset CTWA.');
+      setCtwaDataset(data.dataset || null);
+      if (!silent) setDatasetResult({ success: true, message: data.dataset ? 'Dataset CTWA localizado nesta WABA.' : 'Esta WABA ainda não possui um Dataset CTWA.' });
+    } catch (err: any) {
+      setCtwaDataset(null);
+      if (!silent) setDatasetResult({ success: false, message: err.message });
+    } finally {
+      if (!silent) setDatasetLoading(false);
+    }
+  };
+
+  const createCtwaDataset = async () => {
+    if (!activeAccountId || !window.confirm(`Criar o Dataset CTWA “${datasetName || 'FluxoZap CTWA'}” para esta WABA?`)) return;
+    setDatasetLoading(true);
+    setDatasetResult(null);
+    try {
+      const res = await fetch('/api/config/ctwa-dataset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: activeAccountId, datasetName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Não foi possível criar o Dataset CTWA.');
+      setCtwaDataset(data.dataset || null);
+      setDatasetResult({ success: true, message: data.message || 'Dataset CTWA criado com sucesso.' });
+    } catch (err: any) {
+      setDatasetResult({ success: false, message: err.message });
+    } finally {
+      setDatasetLoading(false);
+    }
+  };
+
   useEffect(() => {
     activeAccountRef.current = activeAccountId;
     setTestResult(null);
@@ -84,7 +128,10 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs, on
     setMaskedToken('');
     setHasAccessToken(false);
     setActiveAccountName('');
+    setCtwaDataset(null);
+    setDatasetResult(null);
     fetchConfig();
+    fetchCtwaDataset(true);
   }, [activeAccountId]);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -323,7 +370,7 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs, on
                 className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-mono text-xs"
               />
               <p className="text-[11px] text-slate-400 mt-1">
-                Gere um token permanente em Usuários do Sistema no Business Manager com permissões <code>whatsapp_business_messaging</code>.
+                Gere um token permanente em Usuários do Sistema com <code>whatsapp_business_messaging</code>, <code>whatsapp_business_management</code> e <code>whatsapp_business_manage_events</code>.
               </p>
             </div>
 
@@ -531,6 +578,53 @@ export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs, on
               </ol>
             </div>
           </div>
+        </div>
+
+        {/* CTWA Dataset associated with the selected WhatsApp Business Account */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
+          <div className="flex items-center gap-2">
+            <Database className="w-4 h-4 text-violet-600" />
+            <h3 className="text-sm font-bold text-slate-900">Dataset de Conversões do WhatsApp (CTWA)</h3>
+          </div>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Consulte ou crie o Dataset ligado diretamente à WABA desta linha. Ele é separado do Pixel configurado em <strong>Meta Conversões</strong> e será priorizado nos eventos de compra que tiverem <code>ctwa_clid</code>.
+          </p>
+
+          <div className="grid gap-3 md:grid-cols-2 text-xs">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">WABA selecionada</label>
+              <input readOnly value={config.wabaId || 'Salve o WABA ID acima'} className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-slate-800 font-mono" />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Dataset atual</label>
+              <input readOnly value={ctwaDataset?.id || 'Nenhum Dataset localizado'} className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-slate-800 font-mono" />
+            </div>
+          </div>
+
+          {!ctwaDataset && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Nome do novo Dataset</label>
+              <input value={datasetName} onChange={(event) => setDatasetName(event.target.value)} maxLength={100} className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 text-xs" />
+            </div>
+          )}
+
+          {datasetResult && (
+            <div className={`rounded-xl border p-3 text-xs ${datasetResult.success ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}`}>
+              {datasetResult.message}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => fetchCtwaDataset(false)} disabled={datasetLoading} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+              {datasetLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Consultar Dataset
+            </button>
+            {!ctwaDataset && (
+              <button type="button" onClick={createCtwaDataset} disabled={datasetLoading || !config.wabaId} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
+                <Database className="w-3.5 h-3.5" /> Criar Dataset CTWA
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-500">A criação usa o token oficial desta linha e exige acesso à WABA com permissões de gerenciamento do WhatsApp e eventos.</p>
         </div>
       </div>
     </div>

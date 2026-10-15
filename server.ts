@@ -36,7 +36,7 @@ const SESSION_RETENTION_DAYS = 17;
 interface ApiLogEntry {
   id: string;
   timestamp: string;
-  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'ads_management' | 'error';
+  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'ads_management' | 'ads_insights' | 'dataset' | 'xpag' | 'storage' | 'integration' | 'error';
   direction: 'outbound' | 'inbound';
   endpoint: string;
   accountId?: string;
@@ -318,6 +318,7 @@ interface WhatsAppAccount {
   wabaId?: string;
   accessToken?: string;
   verifyToken?: string;
+  ctwaDatasetId?: string;
   isDefault?: boolean;
   color?: string;
   flow?: any;
@@ -802,6 +803,35 @@ function getTrustedConversionEventTime(record: XPagPaymentRecord, conversionKey:
   return Number.isFinite(observedAt.getTime()) ? observedAt.toISOString() : new Date().toISOString();
 }
 
+const metaAdPageIdCache = new Map<string, string>();
+
+async function resolveMetaAdPageId(config: MetaCapiConfig, adId: string): Promise<string> {
+  const normalizedAdId = String(adId || '').trim();
+  if (!normalizedAdId || !config.accessToken) return '';
+  const cacheKey = `${config.adAccountId}:${normalizedAdId}`;
+  const cached = metaAdPageIdCache.get(cacheKey);
+  if (cached) return cached;
+
+  const version = /^v\d+\.\d+$/.test(config.graphApiVersion) ? config.graphApiVersion : 'v24.0';
+  const fields = 'creative{object_id,effective_object_story_id,object_story_id}';
+  const response = await fetch(
+    `https://graph.facebook.com/${version}/${encodeURIComponent(normalizedAdId)}?fields=${encodeURIComponent(fields)}`,
+    { headers: { Authorization: `Bearer ${config.accessToken}` } }
+  );
+  const data: any = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error: any = new Error(data?.error?.message || `Não foi possível descobrir a Página do anúncio ${normalizedAdId}.`);
+    error.status = response.status;
+    error.responseBody = data;
+    throw error;
+  }
+  const storyId = String(data?.creative?.effective_object_story_id || data?.creative?.object_story_id || '');
+  const pageId = storyId.includes('_') ? storyId.split('_')[0] : String(data?.creative?.object_id || '');
+  if (!pageId) throw new Error(`A Meta não retornou o page_id do anúncio ${normalizedAdId}.`);
+  metaAdPageIdCache.set(cacheKey, pageId);
+  return pageId;
+}
+
 async function sendMetaPurchaseConversion(
   record: XPagPaymentRecord,
   options: { force?: boolean; reason?: string } = {}
@@ -810,14 +840,34 @@ async function sendMetaPurchaseConversion(
   if (!options.force && record.metaConversionKeys?.includes(conversionKey)) return;
   if (!options.force && record.chargeMode !== 'open' && record.metaConversionSentAt) return;
   const config = record.accountId ? metaCapiConfigs[record.accountId] : undefined;
-  if (!config?.enabled || !config.datasetId || !config.accessToken) return;
   const session = sessions.get(sessionStorageKey(record.accountId, record.sessionPhoneNumber));
   const account = whatsappAccounts.find((item) => item.id === record.accountId);
   const ctwaClid = session?.referral?.ctwaClid;
   const wabaId = account?.wabaId;
-  const hasBusinessAttribution = Boolean(ctwaClid && wabaId);
-  if (config.onlyAttributed && !hasBusinessAttribution) {
-    record.metaConversionError = 'Conversão não enviada: o lead precisa de ctwa_clid e a linha precisa do WABA ID.';
+  if (!config?.enabled) return;
+  const adId = String(session?.referral?.sourceId || '');
+  if (config.onlyAttributed && (!ctwaClid || !adId)) {
+    record.metaConversionError = 'Conversão não enviada: o lead precisa de ctwa_clid e do ID do anúncio de origem.';
+    saveXPagPayments();
+    return;
+  }
+
+  let pageId = '';
+  let pageResolutionError: any;
+  if (ctwaClid && adId && config.datasetId && config.accessToken) {
+    try {
+      pageId = await resolveMetaAdPageId(config, adId);
+    } catch (err: any) {
+      pageResolutionError = err;
+    }
+  }
+  const useConfiguredMessagingDataset = Boolean(ctwaClid && pageId && config.datasetId && config.accessToken);
+  const useWhatsAppDataset = !useConfiguredMessagingDataset && Boolean(ctwaClid && wabaId && account?.ctwaDatasetId && account?.accessToken);
+  const conversionDatasetId = useConfiguredMessagingDataset ? config.datasetId : useWhatsAppDataset ? account!.ctwaDatasetId! : config.datasetId;
+  const conversionAccessToken = useConfiguredMessagingDataset ? config.accessToken : useWhatsAppDataset ? account!.accessToken! : config.accessToken;
+  if (!conversionDatasetId || !conversionAccessToken) return;
+  if (config.onlyAttributed && !useConfiguredMessagingDataset && !useWhatsAppDataset) {
+    record.metaConversionError = pageResolutionError?.message || 'Conversão não enviada: não foi possível resolver a Página do anúncio nem um Dataset ligado à WABA.';
     saveXPagPayments();
     return;
   }
@@ -832,41 +882,44 @@ async function sendMetaPurchaseConversion(
     ph: [crypto.createHash('sha256').update(record.sessionPhoneNumber.replace(/\D/g, '')).digest('hex')],
     external_id: [crypto.createHash('sha256').update(`${record.accountId}:${record.sessionPhoneNumber}`).digest('hex')],
   };
-  if (hasBusinessAttribution) {
+  if (useConfiguredMessagingDataset) {
+    userData.ctwa_clid = ctwaClid;
+    userData.page_id = pageId;
+  } else if (useWhatsAppDataset) {
     userData.ctwa_clid = ctwaClid;
     userData.whatsapp_business_account_id = wabaId!;
   }
   const payload: any = {
+    partner_agent: 'fluxozap',
     data: [{
       event_name: 'Purchase',
       event_time: Math.floor(new Date(eventTime).getTime() / 1000),
       event_id: eventId,
-      action_source: hasBusinessAttribution ? 'business_messaging' : 'chat',
-      messaging_channel: 'whatsapp',
+      action_source: useConfiguredMessagingDataset || useWhatsAppDataset ? 'business_messaging' : 'chat',
+      ...(useConfiguredMessagingDataset || useWhatsAppDataset ? { messaging_channel: 'whatsapp' } : {}),
       user_data: userData,
       custom_data: {
         currency: record.currency,
         value: record.amount,
         order_id: record.externalId,
-        ad_id: session?.referral?.sourceId,
+        ad_id: adId || undefined,
       },
-      partner_agent: 'fluxozap',
     }],
   };
-  if (config.testEventCode?.trim()) payload.test_event_code = config.testEventCode.trim();
+  if (useConfiguredMessagingDataset && config.testEventCode?.trim()) payload.test_event_code = config.testEventCode.trim();
   const version = /^v\d+\.\d+$/.test(config.graphApiVersion) ? config.graphApiVersion : 'v24.0';
-  const endpoint = `https://graph.facebook.com/${version}/${encodeURIComponent(config.datasetId)}/events`;
+  const endpoint = `https://graph.facebook.com/${version}/${encodeURIComponent(conversionDatasetId)}/events`;
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${config.accessToken}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${conversionAccessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const responseBody = await response.json().catch(() => ({}));
     addApiLog({
-      type: 'conversion_event', direction: 'outbound', endpoint: `POST /${version}/${config.datasetId}/events`,
+      type: 'conversion_event', direction: 'outbound', endpoint: `POST /${version}/${conversionDatasetId}/events`,
       accountId: record.accountId, accountName: account?.name, recipient: record.sessionPhoneNumber,
-      messageType: 'Purchase', httpStatus: response.status, success: response.ok,
+      messageType: useConfiguredMessagingDataset ? 'Purchase_CTWA_Page' : useWhatsAppDataset ? 'Purchase_CTWA_WABA' : 'Purchase', httpStatus: response.status, success: response.ok,
       requestPayload: { ...payload, data: payload.data.map((event: any) => ({ ...event, user_data: { ...event.user_data, ph: ['[SHA-256]'], external_id: ['[SHA-256]'] } })) },
       responseBody,
       metaErrorMessage: response.ok ? undefined : responseBody?.error?.message,
@@ -1014,7 +1067,14 @@ function xpagWebhookUrl(webhookKey = '{chave-unica-da-cobranca}'): string {
   return `${lastKnownPublicOrigin}/api/webhooks/xpag/${webhookKey}`;
 }
 
-async function xpagRequest(pathname: string, init: RequestInit = {}): Promise<any> {
+interface XPagRequestContext {
+  accountId?: string;
+  accountName?: string;
+  recipient?: string;
+  messageType?: string;
+}
+
+async function xpagRequest(pathname: string, init: RequestInit = {}, context: XPagRequestContext = {}): Promise<any> {
   if (!xpagConfig.clientId || !xpagConfig.clientSecret) {
     const error: any = new Error('Credenciais da XPag não configuradas. Informe Client ID e Client Secret.');
     error.status = 400;
@@ -1022,32 +1082,53 @@ async function xpagRequest(pathname: string, init: RequestInit = {}): Promise<an
     throw error;
   }
 
-  const response = await fetch(`${xpagConfig.baseUrl.replace(/\/$/, '')}${pathname}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Client-Id': xpagConfig.clientId,
-      'X-Client-Secret': xpagConfig.clientSecret,
-      ...(init.headers || {}),
-    },
-    signal: AbortSignal.timeout(20000),
-  });
-  const rawText = await response.text();
-  let data: any;
+  const method = String(init.method || 'GET').toUpperCase();
+  let requestPayload: any;
+  if (typeof init.body === 'string') {
+    try { requestPayload = JSON.parse(init.body); } catch { requestPayload = init.body; }
+  }
+  if (requestPayload && typeof requestPayload === 'object' && typeof requestPayload.webhook_url === 'string') {
+    requestPayload = { ...requestPayload, webhook_url: requestPayload.webhook_url.replace(/\/[^/]+$/, '/{chave-redigida}') };
+  }
+  const endpoint = `${method} ${pathname.split('?')[0]}`;
   try {
-    data = JSON.parse(rawText);
-  } catch {
-    data = { ok: false, error: rawText || `HTTP ${response.status}` };
+    const response = await fetch(`${xpagConfig.baseUrl.replace(/\/$/, '')}${pathname}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Client-Id': xpagConfig.clientId,
+        'X-Client-Secret': xpagConfig.clientSecret,
+        ...(init.headers || {}),
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    const rawText = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = { ok: false, error: rawText || `HTTP ${response.status}` };
+    }
+    const success = response.ok && data?.ok !== false;
+    addApiLog({
+      type: 'xpag', direction: 'outbound', endpoint, ...context, httpStatus: response.status,
+      success, requestPayload, responseBody: data,
+      metaErrorMessage: success ? undefined : data?.error || `XPag respondeu HTTP ${response.status}.`,
+    });
+    if (!success) {
+      const error: any = new Error(data?.error || `XPag respondeu HTTP ${response.status}.`);
+      error.status = response.status;
+      error.errorCode = data?.error_code;
+      error.responseBody = data;
+      throw error;
+    }
+    return data;
+  } catch (err: any) {
+    if (!err.responseBody) {
+      addApiLog({ type: 'xpag', direction: 'outbound', endpoint, ...context, success: false, requestPayload, metaErrorMessage: err.message });
+    }
+    throw err;
   }
-
-  if (!response.ok || data?.ok === false) {
-    const error: any = new Error(data?.error || `XPag respondeu HTTP ${response.status}.`);
-    error.status = response.status;
-    error.errorCode = data?.error_code;
-    error.responseBody = data;
-    throw error;
-  }
-  return data;
 }
 
 function parsePaymentAmount(value: string): number {
@@ -1239,6 +1320,11 @@ async function createXPagCharge(
     data = await xpagRequest('/cashin', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }, {
+      accountId: session.accountId,
+      accountName: whatsappAccounts.find((account) => account.id === session.accountId)?.name,
+      recipient: session.phoneNumber,
+      messageType: `create_${method.toLowerCase()}_charge`,
     });
     const chargeData = data?.data || data?.payment || data;
     record.transactionId = firstXPagValue(chargeData?.transaction_id, chargeData?.transactionId) || undefined;
@@ -2702,29 +2788,25 @@ async function startServer() {
     const accountId = String(req.query.accountId || '');
     const config = metaCapiConfigs[accountId];
     if (!config?.accessToken || !config.adAccountId) {
-      return res.json({ configured: false, campaigns: [], totals: null, message: 'Configure o token e a conta de anúncios em Meta Conversões.' });
+      return res.json({ configured: false, campaigns: [], totals: null, paging: { hasMore: false, nextCursor: null }, message: 'Configure o token e a conta de anúncios em Meta Conversões.' });
     }
     const allowedPresets = new Set(['today', 'yesterday', 'last_7d', 'last_14d', 'last_30d', 'this_month', 'last_month', 'maximum']);
     const datePreset = allowedPresets.has(String(req.query.datePreset)) ? String(req.query.datePreset) : 'last_30d';
+    const campaignFilter = ['active', 'inactive'].includes(String(req.query.campaignFilter)) ? String(req.query.campaignFilter) : 'all';
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const after = String(req.query.after || '').trim();
     const version = /^v\d+\.\d+$/.test(config.graphApiVersion) ? config.graphApiVersion : 'v24.0';
     const adAccountId = config.adAccountId.startsWith('act_') ? config.adAccountId : `act_${config.adAccountId}`;
-    const graphAll = async (url: string): Promise<any[]> => {
-      const rows: any[] = [];
-      let next: string | undefined = url;
-      for (let page = 0; next && page < 20; page++) {
-        const response: globalThis.Response = await fetch(next, { headers: { Authorization: `Bearer ${config.accessToken}` } });
-        const data: any = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const error: any = new Error(data?.error?.message || `Meta HTTP ${response.status}`);
-          error.status = response.status;
-          error.body = data;
-          throw error;
-        }
-        if (Array.isArray(data.data)) rows.push(...data.data);
-        const candidate: unknown = data?.paging?.next;
-        next = typeof candidate === 'string' && candidate.startsWith('https://graph.facebook.com/') ? candidate : undefined;
+    const graphGet = async (url: string): Promise<any> => {
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${config.accessToken}` } });
+      const data: any = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error: any = new Error(data?.error?.message || `Meta HTTP ${response.status}`);
+        error.status = response.status;
+        error.body = data;
+        throw error;
       }
-      return rows;
+      return data;
     };
     const actionValue = (actions: any, names: string[]): number => {
       if (!Array.isArray(actions)) return 0;
@@ -2733,12 +2815,28 @@ async function startServer() {
     try {
       const campaignFields = 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,updated_time';
       const insightFields = 'campaign_id,campaign_name,impressions,reach,clicks,spend,cpc,cpm,ctr,actions,action_values,cost_per_action_type';
-      const [campaignRows, insightRows, accountResponse] = await Promise.all([
-        graphAll(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/campaigns?fields=${encodeURIComponent(campaignFields)}&limit=100`),
-        graphAll(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/insights?fields=${encodeURIComponent(insightFields)}&level=campaign&date_preset=${encodeURIComponent(datePreset)}&limit=500`),
-        fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}?fields=id,name,currency,account_status,amount_spent,balance,timezone_name`, { headers: { Authorization: `Bearer ${config.accessToken}` } }),
+      const campaignParams = new URLSearchParams({ fields: campaignFields, limit: String(limit) });
+      if (after) campaignParams.set('after', after);
+      if (campaignFilter !== 'all') {
+        campaignParams.set('filtering', JSON.stringify([{
+          field: 'effective_status', operator: campaignFilter === 'active' ? 'IN' : 'NOT_IN',
+          value: ['ACTIVE'],
+        }]));
+      }
+      const campaignPayload = await graphGet(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/campaigns?${campaignParams.toString()}`);
+      const campaignRows = Array.isArray(campaignPayload?.data) ? campaignPayload.data : [];
+      const campaignIds = campaignRows.map((row: any) => String(row.id));
+      const insightParams = new URLSearchParams({ fields: insightFields, level: 'campaign', date_preset: datePreset, limit: String(Math.max(limit, 10)) });
+      if (campaignIds.length > 0) insightParams.set('filtering', JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: campaignIds }]));
+      const totalFields = 'impressions,reach,clicks,spend,cpc,cpm,ctr,actions,action_values,cost_per_action_type';
+      const [insightPayload, totalsPayload, accountData] = await Promise.all([
+        campaignIds.length > 0
+          ? graphGet(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/insights?${insightParams.toString()}`)
+          : Promise.resolve({ data: [] }),
+        after ? Promise.resolve({ data: [] }) : graphGet(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/insights?fields=${encodeURIComponent(totalFields)}&level=account&date_preset=${encodeURIComponent(datePreset)}&limit=1`),
+        after ? Promise.resolve(null) : graphGet(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}?fields=id,name,currency,account_status,amount_spent,balance,timezone_name`),
       ]);
-      const accountData: any = await accountResponse.json().catch(() => ({}));
+      const insightRows = Array.isArray(insightPayload?.data) ? insightPayload.data : [];
       const insightMap = new Map(insightRows.map((row: any) => [String(row.campaign_id), row]));
       const purchaseNames = ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_conversion.purchase'];
       const campaigns = campaignRows.map((campaign: any) => {
@@ -2763,17 +2861,38 @@ async function startServer() {
           },
         };
       });
-      const totals = campaigns.reduce((total: any, campaign: any) => {
-        for (const key of ['impressions', 'reach', 'clicks', 'spend', 'purchases', 'purchaseValue']) total[key] += campaign.metrics[key] || 0;
-        return total;
-      }, { impressions: 0, reach: 0, clicks: 0, spend: 0, purchases: 0, purchaseValue: 0 });
-      totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
-      totals.cpm = totals.impressions > 0 ? totals.spend / totals.impressions * 1000 : 0;
-      totals.ctr = totals.impressions > 0 ? totals.clicks / totals.impressions * 100 : 0;
-      totals.costPerPurchase = totals.purchases > 0 ? totals.spend / totals.purchases : 0;
-      totals.roas = totals.spend > 0 ? totals.purchaseValue / totals.spend : 0;
-      res.json({ configured: true, account: accountData, datePreset, campaigns, totals, fetchedAt: new Date().toISOString() });
+      const totalInsight = Array.isArray(totalsPayload?.data) ? totalsPayload.data[0] || {} : {};
+      const totals: any = after ? null : {
+        impressions: Number(totalInsight.impressions) || 0, reach: Number(totalInsight.reach) || 0,
+        clicks: Number(totalInsight.clicks) || 0, spend: Number(totalInsight.spend) || 0,
+        purchases: actionValue(totalInsight.actions, purchaseNames),
+        purchaseValue: actionValue(totalInsight.action_values, purchaseNames),
+      };
+      if (totals) {
+        totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
+        totals.cpm = totals.impressions > 0 ? totals.spend / totals.impressions * 1000 : 0;
+        totals.ctr = totals.impressions > 0 ? totals.clicks / totals.impressions * 100 : 0;
+        totals.costPerPurchase = totals.purchases > 0 ? totals.spend / totals.purchases : 0;
+        totals.roas = totals.spend > 0 ? totals.purchaseValue / totals.spend : 0;
+      }
+      const paging = {
+        hasMore: Boolean(campaignPayload?.paging?.next),
+        nextCursor: campaignPayload?.paging?.cursors?.after ? String(campaignPayload.paging.cursors.after) : null,
+      };
+      addApiLog({
+        type: 'ads_insights', direction: 'outbound', endpoint: `GET /${adAccountId}/campaigns`, accountId,
+        messageType: `campaigns_${campaignFilter}`, httpStatus: 200, success: true,
+        requestPayload: { datePreset, campaignFilter, limit, after: after || undefined },
+        responseBody: { returnedCampaigns: campaigns.length, hasMore: paging.hasMore },
+      });
+      res.json({ configured: true, account: accountData, datePreset, campaignFilter, campaigns, totals, paging, fetchedAt: new Date().toISOString() });
     } catch (err: any) {
+      addApiLog({
+        type: 'ads_insights', direction: 'outbound', endpoint: `GET /${adAccountId}/campaigns`, accountId,
+        messageType: `campaigns_${campaignFilter}`, httpStatus: err.status, success: false,
+        requestPayload: { datePreset, campaignFilter, limit, after: after || undefined }, responseBody: err.body,
+        metaErrorCode: err.body?.error?.code, metaErrorMessage: err.message,
+      });
       res.status(err.status || 500).json({ configured: true, error: err.message, meta: err.body?.error });
     }
   });
@@ -2806,11 +2925,12 @@ async function startServer() {
   app.get('/api/meta-capi/sales', (req: Request, res: Response) => {
     const accountId = String(req.query.accountId || '');
     const config = metaCapiConfigs[accountId];
-    const payments = Array.from(xpagPayments.values())
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const allPayments = Array.from(xpagPayments.values())
       .filter((payment) => !accountId || payment.accountId === accountId)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, 500)
-      .map((payment) => {
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const serializePayment = (payment: XPagPaymentRecord) => {
         const session = sessions.get(sessionStorageKey(payment.accountId, payment.sessionPhoneNumber));
         let conversionStatus = 'not_applicable';
         if (payment.status === 'confirmed') {
@@ -2842,18 +2962,30 @@ async function startServer() {
             attempts: payment.metaConversionAttempts || [],
           },
         };
-      });
-    const summary = payments.reduce((total: any, payment: any) => {
+      };
+    const summary = allPayments.reduce((total: any, payment) => {
+      const serialized = serializePayment(payment);
       total.payments += 1;
-      if (payment.status === 'confirmed') {
+      if (serialized.status === 'confirmed') {
         total.confirmed += 1;
-        total.revenueByCurrency[payment.currency] = (total.revenueByCurrency[payment.currency] || 0) + payment.amount;
+        total.revenueByCurrency[serialized.currency] = (total.revenueByCurrency[serialized.currency] || 0) + serialized.amount;
       }
-      if (payment.conversion.status === 'sent') total.sent += 1;
-      if (['failed', 'not_attributed'].includes(payment.conversion.status)) total.failed += 1;
+      if (serialized.conversion.status === 'sent') total.sent += 1;
+      if (['failed', 'not_attributed'].includes(serialized.conversion.status)) total.failed += 1;
       return total;
     }, { payments: 0, confirmed: 0, revenueByCurrency: {}, sent: 0, failed: 0 });
-    res.json({ configured: Boolean(config?.enabled && config.datasetId && config.accessToken), summary, sales: payments });
+    const offset = (page - 1) * limit;
+    const sales = allPayments.slice(offset, offset + limit).map(serializePayment);
+    const hasMore = offset + sales.length < allPayments.length;
+    const whatsappAccount = whatsappAccounts.find((account) => account.id === accountId);
+    const hasConversionDestination = Boolean(
+      (whatsappAccount?.ctwaDatasetId && whatsappAccount?.accessToken) ||
+      (config?.datasetId && config?.accessToken)
+    );
+    res.json({
+      configured: Boolean(config?.enabled && hasConversionDestination), summary, sales,
+      pagination: { page, limit, total: allPayments.length, hasMore, nextPage: hasMore ? page + 1 : null },
+    });
   });
 
   app.post('/api/meta-capi/sales/:externalId/retry', async (req: Request, res: Response) => {
@@ -3080,6 +3212,7 @@ async function startServer() {
         phoneNumberId: account.phoneNumberId,
         displayPhoneNumber: account.phoneNumber,
         wabaId: account.wabaId || '',
+        ctwaDatasetId: account.ctwaDatasetId || '',
         verifyToken: account.verifyToken || metaConfig.verifyToken,
         testPhoneNumber: metaConfig.testPhoneNumber,
         hasAccessToken: Boolean(account.accessToken),
@@ -3095,6 +3228,80 @@ async function startServer() {
         ? `${metaConfig.accessToken.substring(0, 6)}...${metaConfig.accessToken.slice(-4)}`
         : '',
     });
+  });
+
+  const resolveWhatsAppDatasetCredentials = (accountId: string) => {
+    const account = whatsappAccounts.find((item) => item.id === accountId);
+    if (!account) return { error: 'Linha do WhatsApp não encontrada.' } as const;
+    const wabaId = String(account.wabaId || '').trim();
+    const accessToken = String(account.accessToken || '').trim();
+    if (!wabaId || !accessToken) {
+      return { error: 'Salve o WABA ID e o Access Token desta linha antes de configurar o Dataset CTWA.' } as const;
+    }
+    return { account, wabaId, accessToken } as const;
+  };
+
+  app.get('/api/config/ctwa-dataset', async (req: Request, res: Response) => {
+    const accountId = String(req.query.accountId || '');
+    const credentials = resolveWhatsAppDatasetCredentials(accountId);
+    if ('error' in credentials) return res.status(accountId ? 400 : 404).json({ success: false, error: credentials.error });
+    const { account, wabaId, accessToken } = credentials;
+    const endpoint = `GET /v24.0/${wabaId}/dataset`;
+    try {
+      const response = await fetch(`https://graph.facebook.com/v24.0/${encodeURIComponent(wabaId)}/dataset?fields=id,name`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const payload: any = await response.json().catch(() => ({}));
+      const dataset = Array.isArray(payload?.data) ? payload.data[0] || null : payload?.id ? payload : null;
+      if (response.ok && dataset?.id && account.ctwaDatasetId !== String(dataset.id)) {
+        account.ctwaDatasetId = String(dataset.id);
+        account.updatedAt = new Date().toISOString();
+        saveAccountsToFile();
+      }
+      addApiLog({
+        type: 'dataset', direction: 'outbound', endpoint, accountId: account.id, accountName: account.name,
+        phoneNumberId: account.phoneNumberId, httpStatus: response.status, success: response.ok,
+        responseBody: payload, metaErrorCode: payload?.error?.code, metaErrorMessage: payload?.error?.message,
+      });
+      if (!response.ok) return res.status(response.status).json({ success: false, error: payload?.error?.message || 'A Meta não permitiu consultar o Dataset CTWA.', meta: payload?.error });
+      return res.json({ success: true, dataset, wabaId, storedDatasetId: account.ctwaDatasetId || '' });
+    } catch (err: any) {
+      addApiLog({ type: 'dataset', direction: 'outbound', endpoint, accountId: account.id, accountName: account.name, success: false, metaErrorMessage: err.message });
+      return res.status(500).json({ success: false, error: err.message || 'Falha de rede ao consultar o Dataset CTWA.' });
+    }
+  });
+
+  app.post('/api/config/ctwa-dataset', async (req: Request, res: Response) => {
+    const accountId = String(req.body?.accountId || '');
+    const datasetName = String(req.body?.datasetName || 'FluxoZap CTWA').trim().slice(0, 100);
+    const credentials = resolveWhatsAppDatasetCredentials(accountId);
+    if ('error' in credentials) return res.status(accountId ? 400 : 404).json({ success: false, error: credentials.error });
+    const { account, wabaId, accessToken } = credentials;
+    const endpoint = `POST /v24.0/${wabaId}/dataset`;
+    try {
+      const response = await fetch(`https://graph.facebook.com/v24.0/${encodeURIComponent(wabaId)}/dataset`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ dataset_name: datasetName || 'FluxoZap CTWA' }),
+      });
+      const payload: any = await response.json().catch(() => ({}));
+      if (response.ok && payload?.id) {
+        account.ctwaDatasetId = String(payload.id);
+        account.updatedAt = new Date().toISOString();
+        saveAccountsToFile();
+      }
+      addApiLog({
+        type: 'dataset', direction: 'outbound', endpoint, accountId: account.id, accountName: account.name,
+        phoneNumberId: account.phoneNumberId, messageType: 'create_ctwa_dataset', httpStatus: response.status,
+        success: response.ok, requestPayload: { dataset_name: datasetName }, responseBody: payload,
+        metaErrorCode: payload?.error?.code, metaErrorMessage: payload?.error?.message,
+      });
+      if (!response.ok) return res.status(response.status).json({ success: false, error: payload?.error?.message || 'A Meta não permitiu criar o Dataset CTWA.', meta: payload?.error });
+      return res.json({ success: true, message: 'Dataset CTWA criado e vinculado a esta WABA.', dataset: { id: String(payload.id), name: datasetName } });
+    } catch (err: any) {
+      addApiLog({ type: 'dataset', direction: 'outbound', endpoint, accountId: account.id, accountName: account.name, success: false, requestPayload: { dataset_name: datasetName }, metaErrorMessage: err.message });
+      return res.status(500).json({ success: false, error: err.message || 'Falha de rede ao criar o Dataset CTWA.' });
+    }
   });
 
   app.post('/api/config', async (req: Request, res: Response) => {
@@ -3169,17 +3376,17 @@ async function startServer() {
   app.get('/api/logs', (req: Request, res: Response) => {
     const filter = req.query.filter as string;
     const accountId = String(req.query.accountId || '');
-    let filtered = accountId ? apiLogs.filter((log) => log.accountId === accountId) : apiLogs;
+    let filtered = accountId ? apiLogs.filter((log) => !log.accountId || log.accountId === accountId) : apiLogs;
     if (filter === 'errors') {
-      filtered = apiLogs.filter((l) => !l.success);
+      filtered = filtered.filter((l) => !l.success);
     } else if (filter === 'outbound') {
-      filtered = apiLogs.filter((l) => l.direction === 'outbound');
+      filtered = filtered.filter((l) => l.direction === 'outbound');
     } else if (filter === 'inbound') {
-      filtered = apiLogs.filter((l) => l.direction === 'inbound');
+      filtered = filtered.filter((l) => l.direction === 'inbound');
     }
     res.json({
       logs: filtered,
-      total: apiLogs.length,
+      total: filtered.length,
       errorsCount: filtered.filter((l) => !l.success).length,
     });
   });
@@ -3404,13 +3611,24 @@ async function startServer() {
         xpagPayments.set(record.externalId, record);
       }
     }
-    if (!record) return res.status(403).json({ success: false, error: 'Webhook XPag inválido ou expirado.' });
+    if (!record) {
+      addApiLog({ type: 'xpag', direction: 'inbound', endpoint: 'POST /api/webhooks/xpag/{chave}', messageType: 'webhook_rejected', httpStatus: 403, success: false, metaErrorMessage: 'Webhook XPag inválido ou expirado.' });
+      return res.status(403).json({ success: false, error: 'Webhook XPag inválido ou expirado.' });
+    }
 
     const event = req.body || {};
     const eventData = event?.data || event?.payment || event;
     if (eventData.external_id && String(eventData.external_id) !== record.externalId) {
+      addApiLog({ type: 'xpag', direction: 'inbound', endpoint: 'POST /api/webhooks/xpag/{chave}', accountId: record.accountId, recipient: record.sessionPhoneNumber, messageType: 'webhook_mismatch', httpStatus: 409, success: false, requestPayload: event, metaErrorMessage: 'A cobrança não corresponde à chave deste webhook.' });
       return res.status(409).json({ success: false, error: 'A cobrança não corresponde à chave deste webhook.' });
     }
+
+    addApiLog({
+      type: 'xpag', direction: 'inbound', endpoint: 'POST /api/webhooks/xpag/{chave}',
+      accountId: record.accountId, accountName: whatsappAccounts.find((account) => account.id === record.accountId)?.name,
+      recipient: record.sessionPhoneNumber, messageType: `payment_${String(eventData.status || 'unknown').toLowerCase()}`,
+      httpStatus: 200, success: true, requestPayload: event,
+    });
 
     // The unguessable URL resolves the exact payer/payment before any event data
     // is trusted. Return quickly and perform the authenticated reconciliation below.
@@ -3448,7 +3666,8 @@ async function startServer() {
       if (record.chargeMode === 'open') {
         verification = await xpagRequest(
           `/consult-transaction?external_id=${encodeURIComponent(record.externalId)}&limit=100`,
-          { method: 'GET' }
+          { method: 'GET' },
+          { accountId: record.accountId, recipient: record.sessionPhoneNumber, messageType: 'verify_open_payment' }
         );
         const verificationRoot = verification?.data || verification?.payment || verification;
         const payments = Array.isArray(verificationRoot?.payments) ? verificationRoot.payments : [];
@@ -3472,7 +3691,8 @@ async function startServer() {
         if (!referenceValue) throw new Error('Pagamento XPag sem identificador consultável.');
         verification = await xpagRequest(
           `/consult-transaction?${referenceName}=${encodeURIComponent(referenceValue)}`,
-          { method: 'GET' }
+          { method: 'GET' },
+          { accountId: record.accountId, recipient: record.sessionPhoneNumber, messageType: 'verify_payment' }
         );
         verificationData = verification?.data || verification?.payment || verification;
       }
