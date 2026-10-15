@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -28,7 +28,7 @@ import { EndNode } from './EndNode';
 import { NodeSidebar } from './NodeSidebar';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { NodeType, FlowNodeData } from '../../types/flow';
-import { Save, Check, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { Save, Check, Download, Upload } from 'lucide-react';
 
 interface FlowEditorProps {
   onFlowSaved?: () => void;
@@ -48,6 +48,8 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [transferMessage, setTransferMessage] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // Define custom node types
   const nodeTypes = useMemo(
@@ -382,6 +384,77 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
     }
   };
 
+  const handleExportFlow = () => {
+    const startNode = nodes.find((node) => node.type === 'start');
+    const payload = {
+      format: 'fluxozap-flow',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      source: { accountId: accountId || 'main', accountName: accountName || 'Principal' },
+      flow: {
+        name: accountName ? `Fluxo - ${accountName}` : 'Fluxo WhatsApp',
+        description: 'Funil exportado pelo FluxoZap',
+        triggerType: startNode?.data?.triggerType || 'all',
+        triggerKeywords: startNode?.data?.triggerKeywords || [],
+        nodes,
+        edges,
+      },
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const safeName = (accountName || 'fluxo').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+    anchor.href = url;
+    anchor.download = `fluxozap-${safeName || 'funil'}-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setTransferMessage('Funil exportado com sucesso.');
+    window.setTimeout(() => setTransferMessage(null), 3000);
+  };
+
+  const handleImportFlow = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setTransferMessage('Arquivo recusado: o JSON do funil deve ter no máximo 10 MB.');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(await file.text());
+      const imported = parsed?.format === 'fluxozap-flow' ? parsed.flow : parsed;
+      if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) {
+        throw new Error('JSON inválido: nodes e edges são obrigatórios.');
+      }
+      if (imported.nodes.length > 1000 || imported.edges.length > 3000) {
+        throw new Error('O funil excede o limite de 1.000 blocos ou 3.000 conexões.');
+      }
+      const nodeIds = new Set<string>();
+      for (const node of imported.nodes) {
+        if (!node?.id || typeof node.id !== 'string' || !node?.type || !node?.position || typeof node.data !== 'object') {
+          throw new Error('O arquivo contém um bloco inválido.');
+        }
+        if (nodeIds.has(node.id)) throw new Error(`ID de bloco duplicado: ${node.id}`);
+        nodeIds.add(node.id);
+      }
+      for (const edge of imported.edges) {
+        if (!edge?.id || !nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
+          throw new Error('O arquivo contém uma conexão órfã ou inválida.');
+        }
+      }
+      if (!imported.nodes.some((node: Node) => node.type === 'start')) throw new Error('O funil importado precisa ter um bloco de início.');
+      if (!window.confirm(`Importar "${file.name}" substituirá o desenho atualmente aberto. O funil só será gravado nesta linha quando você clicar em Salvar Fluxo. Continuar?`)) return;
+      setNodes(imported.nodes.map((node: Node) => ({ ...node })));
+      setEdges(imported.edges.map((edge: Edge) => ({ ...edge, interactionWidth: edge.interactionWidth || 32 })));
+      setSelectedNode(null);
+      setSaveSuccess(false);
+      setTransferMessage('Funil importado. Revise e clique em Salvar Fluxo para gravar nesta linha.');
+      window.setTimeout(() => reactFlowInstance?.fitView({ padding: 0.15, duration: 300 }), 50);
+    } catch (error: any) {
+      setTransferMessage(error.message || 'Não foi possível importar este arquivo.');
+    }
+  };
+
   return (
     <div className="flex h-full w-full bg-slate-50 relative overflow-hidden">
       {/* Sidebar toolbox with available node types */}
@@ -394,6 +467,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
+        <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImportFlow} />
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -413,6 +487,13 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
 
           {/* Floating Action Controls */}
           <Panel position="top-right" className="flex items-center gap-2 m-4">
+            {transferMessage && <span className="max-w-sm rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-[11px] font-semibold text-slate-700 shadow-sm">{transferMessage}</span>}
+            <button type="button" onClick={() => importInputRef.current?.click()} className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50">
+              <Upload className="w-3.5 h-3.5" /> Importar
+            </button>
+            <button type="button" onClick={handleExportFlow} disabled={nodes.length === 0} className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50 disabled:opacity-50">
+              <Download className="w-3.5 h-3.5" /> Exportar
+            </button>
             <button
               type="button"
               onClick={handleSaveFlow}

@@ -2,8 +2,9 @@
   "acc_meta_primary": {
     "accountId": "acc_meta_primary",
     "enabled": true,
-    "businessManagerId": "",
-    "datasetId": "",
+    "businessManagerId": "256408447561460",
+    "adAccountId": "act_696501612732397",
+    "datasetId": "1149878088020103",
     "accessToken": "EAAYIxSBSuAMBSvptPYpVLvJ6SxoURyjYXLY0VnN2e08636SzntnwehAq8IWJO1Y1afYcvTUMFKfoKCkyce4ihaglCqD6RDm8GYqvbK3nrUWZAgjZB9W6ZBLMnJuOYVLM8igKcYP2IoPpAsPNApfVDVR2yuwKCpESWChJbnZCvzJdP5YGBEjc0BRACYaNZCNW0SQZDZD",
     "graphApiVersion": "v26.0",
     "testEventCode": "",

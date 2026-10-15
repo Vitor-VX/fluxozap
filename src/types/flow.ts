@@ -239,7 +239,7 @@ export interface FlowDefinition {
 export interface ApiLogEntry {
   id: string;
   timestamp: string;
-  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'error';
+  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'ads_management' | 'error';
   direction: 'outbound' | 'inbound';
   endpoint: string;
   accountId?: string;

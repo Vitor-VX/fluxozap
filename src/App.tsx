@@ -10,11 +10,13 @@ import {
   Unplug,
   BadgeDollarSign,
   Activity,
+  BarChart3,
 } from 'lucide-react';
 import { FlowEditor } from './components/flow/FlowEditor';
 import { MetaApiSettings } from './components/settings/MetaApiSettings';
 import { XPagSettings } from './components/settings/XPagSettings';
 import { MetaConversionsSettings } from './components/settings/MetaConversionsSettings';
+import { FacebookAdsDashboard } from './components/ads/FacebookAdsDashboard';
 import { ConversationsList } from './components/conversations/ConversationsList';
 import { LogsViewer } from './components/logs/LogsViewer';
 import { MongoDbSettings } from './components/database/MongoDbSettings';
@@ -25,7 +27,7 @@ import { AccountManagerModal } from './components/accounts/AccountManagerModal';
 import { WhatsAppAccount } from './types/flow';
 import { DollarSign } from 'lucide-react';
 
-type ActiveTab = 'editor' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag' | 'capi';
+type ActiveTab = 'editor' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag' | 'capi' | 'ads';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
@@ -250,6 +252,17 @@ export default function App() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('ads')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === 'ads' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Facebook Ads</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'settings'
@@ -308,6 +321,7 @@ export default function App() {
         {activeTab === 'r2' && <R2StorageSettings />}
         {activeTab === 'xpag' && <XPagSettings />}
         {activeTab === 'capi' && <MetaConversionsSettings accountId={activeAccountId} accountName={activeAccount?.name} />}
+        {activeTab === 'ads' && <FacebookAdsDashboard accountId={activeAccountId} accountName={activeAccount?.name} onOpenSettings={() => setActiveTab('capi')} />}
         {activeTab === 'settings' && (
           <MetaApiSettings
             onOpenLogs={() => setActiveTab('logs')}

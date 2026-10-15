@@ -36,7 +36,7 @@ const SESSION_RETENTION_DAYS = 17;
 interface ApiLogEntry {
   id: string;
   timestamp: string;
-  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'error';
+  type: 'outgoing_message' | 'incoming_webhook' | 'connection_test' | 'conversion_event' | 'ads_management' | 'error';
   direction: 'outbound' | 'inbound';
   endpoint: string;
   accountId?: string;
@@ -468,6 +468,7 @@ interface XPagPaymentRecord {
   metaConversionEventId?: string;
   metaConversionError?: string;
   metaConversionKeys?: string[];
+  metaConversionResponse?: any;
 }
 
 let xpagConfig: XPagConfig = {
@@ -841,9 +842,11 @@ async function sendMetaPurchaseConversion(record: XPagPaymentRecord): Promise<vo
     record.metaConversionSentAt = new Date().toISOString();
     record.metaConversionEventId = eventId;
     record.metaConversionError = undefined;
+    record.metaConversionResponse = responseBody;
     record.metaConversionKeys = [...(record.metaConversionKeys || []), conversionKey];
   } catch (err: any) {
     record.metaConversionError = err.message || 'Falha ao enviar conversão à Meta.';
+    record.metaConversionResponse = err.responseBody || undefined;
   }
   saveXPagPayments();
 }
@@ -2640,6 +2643,174 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || 'Não foi possível criar o Pixel.' });
     }
+  });
+
+  app.get('/api/facebook-ads/dashboard', async (req: Request, res: Response) => {
+    const accountId = String(req.query.accountId || '');
+    const config = metaCapiConfigs[accountId];
+    if (!config?.accessToken || !config.adAccountId) {
+      return res.json({ configured: false, campaigns: [], totals: null, message: 'Configure o token e a conta de anúncios em Meta Conversões.' });
+    }
+    const allowedPresets = new Set(['today', 'yesterday', 'last_7d', 'last_14d', 'last_30d', 'this_month', 'last_month', 'maximum']);
+    const datePreset = allowedPresets.has(String(req.query.datePreset)) ? String(req.query.datePreset) : 'last_30d';
+    const version = /^v\d+\.\d+$/.test(config.graphApiVersion) ? config.graphApiVersion : 'v24.0';
+    const adAccountId = config.adAccountId.startsWith('act_') ? config.adAccountId : `act_${config.adAccountId}`;
+    const graphAll = async (url: string): Promise<any[]> => {
+      const rows: any[] = [];
+      let next: string | undefined = url;
+      for (let page = 0; next && page < 20; page++) {
+        const response: globalThis.Response = await fetch(next, { headers: { Authorization: `Bearer ${config.accessToken}` } });
+        const data: any = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error: any = new Error(data?.error?.message || `Meta HTTP ${response.status}`);
+          error.status = response.status;
+          error.body = data;
+          throw error;
+        }
+        if (Array.isArray(data.data)) rows.push(...data.data);
+        const candidate: unknown = data?.paging?.next;
+        next = typeof candidate === 'string' && candidate.startsWith('https://graph.facebook.com/') ? candidate : undefined;
+      }
+      return rows;
+    };
+    const actionValue = (actions: any, names: string[]): number => {
+      if (!Array.isArray(actions)) return 0;
+      return actions.filter((item: any) => names.includes(String(item.action_type))).reduce((sum: number, item: any) => sum + (Number(item.value) || 0), 0);
+    };
+    try {
+      const campaignFields = 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,updated_time';
+      const insightFields = 'campaign_id,campaign_name,impressions,reach,clicks,spend,cpc,cpm,ctr,actions,action_values,cost_per_action_type';
+      const [campaignRows, insightRows, accountResponse] = await Promise.all([
+        graphAll(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/campaigns?fields=${encodeURIComponent(campaignFields)}&limit=100`),
+        graphAll(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}/insights?fields=${encodeURIComponent(insightFields)}&level=campaign&date_preset=${encodeURIComponent(datePreset)}&limit=500`),
+        fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(adAccountId)}?fields=id,name,currency,account_status,amount_spent,balance,timezone_name`, { headers: { Authorization: `Bearer ${config.accessToken}` } }),
+      ]);
+      const accountData: any = await accountResponse.json().catch(() => ({}));
+      const insightMap = new Map(insightRows.map((row: any) => [String(row.campaign_id), row]));
+      const purchaseNames = ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_conversion.purchase'];
+      const campaigns = campaignRows.map((campaign: any) => {
+        const insight: any = insightMap.get(String(campaign.id)) || {};
+        const purchases = actionValue(insight.actions, purchaseNames);
+        const purchaseValue = actionValue(insight.action_values, purchaseNames);
+        const spend = Number(insight.spend) || 0;
+        return {
+          ...campaign,
+          metrics: {
+            impressions: Number(insight.impressions) || 0,
+            reach: Number(insight.reach) || 0,
+            clicks: Number(insight.clicks) || 0,
+            spend,
+            cpc: Number(insight.cpc) || 0,
+            cpm: Number(insight.cpm) || 0,
+            ctr: Number(insight.ctr) || 0,
+            purchases,
+            purchaseValue,
+            costPerPurchase: purchases > 0 ? spend / purchases : 0,
+            roas: spend > 0 ? purchaseValue / spend : 0,
+          },
+        };
+      });
+      const totals = campaigns.reduce((total: any, campaign: any) => {
+        for (const key of ['impressions', 'reach', 'clicks', 'spend', 'purchases', 'purchaseValue']) total[key] += campaign.metrics[key] || 0;
+        return total;
+      }, { impressions: 0, reach: 0, clicks: 0, spend: 0, purchases: 0, purchaseValue: 0 });
+      totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
+      totals.cpm = totals.impressions > 0 ? totals.spend / totals.impressions * 1000 : 0;
+      totals.ctr = totals.impressions > 0 ? totals.clicks / totals.impressions * 100 : 0;
+      totals.costPerPurchase = totals.purchases > 0 ? totals.spend / totals.purchases : 0;
+      totals.roas = totals.spend > 0 ? totals.purchaseValue / totals.spend : 0;
+      res.json({ configured: true, account: accountData, datePreset, campaigns, totals, fetchedAt: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ configured: true, error: err.message, meta: err.body?.error });
+    }
+  });
+
+  app.post('/api/facebook-ads/campaigns/:campaignId/status', async (req: Request, res: Response) => {
+    const accountId = String(req.body?.accountId || '');
+    const status = String(req.body?.status || '').toUpperCase();
+    const config = metaCapiConfigs[accountId];
+    if (!config?.accessToken || !config.adAccountId) return res.status(400).json({ success: false, error: 'Token ou conta de anúncios não configurados.' });
+    if (!['ACTIVE', 'PAUSED'].includes(status)) return res.status(400).json({ success: false, error: 'Status permitido: ACTIVE ou PAUSED.' });
+    const version = /^v\d+\.\d+$/.test(config.graphApiVersion) ? config.graphApiVersion : 'v24.0';
+    const expectedAccountId = config.adAccountId.replace(/^act_/, '');
+    try {
+      const ownershipResponse = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(req.params.campaignId)}?fields=id,name,account_id,status`, { headers: { Authorization: `Bearer ${config.accessToken}` } });
+      const campaign: any = await ownershipResponse.json().catch(() => ({}));
+      if (!ownershipResponse.ok) return res.status(400).json({ success: false, error: campaign?.error?.message || 'Campanha não encontrada.' });
+      if (String(campaign.account_id) !== expectedAccountId) return res.status(403).json({ success: false, error: 'Esta campanha não pertence à conta configurada nesta linha.' });
+      const updateResponse = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(req.params.campaignId)}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${config.accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ status }),
+      });
+      const result: any = await updateResponse.json().catch(() => ({}));
+      addApiLog({ type: 'ads_management', direction: 'outbound', endpoint: `POST /${req.params.campaignId}`, accountId, messageType: `campaign_${status.toLowerCase()}`, httpStatus: updateResponse.status, success: updateResponse.ok, requestPayload: { status }, responseBody: result, metaErrorMessage: result?.error?.message });
+      if (!updateResponse.ok) return res.status(400).json({ success: false, error: result?.error?.message || 'A Meta recusou a alteração.' });
+      res.json({ success: true, message: `Campanha ${status === 'ACTIVE' ? 'ativada' : 'pausada'} com sucesso.`, campaignId: req.params.campaignId, status });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/meta-capi/sales', (req: Request, res: Response) => {
+    const accountId = String(req.query.accountId || '');
+    const config = metaCapiConfigs[accountId];
+    const payments = Array.from(xpagPayments.values())
+      .filter((payment) => !accountId || payment.accountId === accountId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 500)
+      .map((payment) => {
+        const session = sessions.get(sessionStorageKey(payment.accountId, payment.sessionPhoneNumber));
+        let conversionStatus = 'not_applicable';
+        if (payment.status === 'confirmed') {
+          if (payment.metaConversionSentAt) conversionStatus = 'sent';
+          else if (payment.metaConversionError?.includes('ctwa_clid')) conversionStatus = 'not_attributed';
+          else if (payment.metaConversionError) conversionStatus = 'failed';
+          else if (!config?.enabled) conversionStatus = 'disabled';
+          else conversionStatus = 'pending';
+        }
+        return {
+          externalId: payment.externalId,
+          transactionId: payment.transactionId,
+          method: payment.method,
+          amount: payment.amount,
+          currency: payment.currency,
+          status: payment.status,
+          paidAt: payment.paidAt,
+          createdAt: payment.createdAt,
+          updatedAt: payment.updatedAt,
+          customer: { phoneNumber: payment.sessionPhoneNumber, name: session?.name || payment.payer?.name },
+          attribution: { adId: session?.referral?.sourceId, ctwaClid: Boolean(session?.referral?.ctwaClid) },
+          conversion: {
+            status: conversionStatus,
+            sentAt: payment.metaConversionSentAt,
+            eventId: payment.metaConversionEventId,
+            error: payment.metaConversionError,
+            response: payment.metaConversionResponse,
+          },
+        };
+      });
+    const summary = payments.reduce((total: any, payment: any) => {
+      total.payments += 1;
+      if (payment.status === 'confirmed') {
+        total.confirmed += 1;
+        total.revenueByCurrency[payment.currency] = (total.revenueByCurrency[payment.currency] || 0) + payment.amount;
+      }
+      if (payment.conversion.status === 'sent') total.sent += 1;
+      if (['failed', 'not_attributed'].includes(payment.conversion.status)) total.failed += 1;
+      return total;
+    }, { payments: 0, confirmed: 0, revenueByCurrency: {}, sent: 0, failed: 0 });
+    res.json({ configured: Boolean(config?.enabled && config.datasetId && config.accessToken), summary, sales: payments });
+  });
+
+  app.post('/api/meta-capi/sales/:externalId/retry', async (req: Request, res: Response) => {
+    const accountId = String(req.body?.accountId || '');
+    const payment = xpagPayments.get(String(req.params.externalId));
+    if (!payment || payment.accountId !== accountId) return res.status(404).json({ success: false, error: 'Venda não encontrada nesta linha.' });
+    if (payment.status !== 'confirmed') return res.status(409).json({ success: false, error: 'Somente pagamentos confirmados podem reenviar a conversão.' });
+    if (payment.metaConversionSentAt) return res.json({ success: true, message: 'Esta conversão já foi aceita pela Meta.', payment });
+    payment.metaConversionError = undefined;
+    await sendMetaPurchaseConversion(payment);
+    const success = Boolean(payment.metaConversionSentAt);
+    res.status(success ? 200 : 400).json({ success, message: success ? 'Conversão reenviada e aceita pela Meta.' : payment.metaConversionError || 'A Meta não confirmou o evento.', payment });
   });
 
   // Persist outbound flow media in R2. Unlike received media, this endpoint
