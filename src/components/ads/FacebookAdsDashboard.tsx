@@ -26,6 +26,19 @@ interface Sale {
 const metricCurrency = (value: number, currency = 'BRL') => new Intl.NumberFormat('pt-BR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value || 0);
 const integer = (value: number) => new Intl.NumberFormat('pt-BR').format(value || 0);
 const PAGE_SIZE = 10;
+const ADS_DATE_PRESET_KEY = 'fluxozap:facebook-ads:date-preset';
+const ADS_CAMPAIGN_FILTER_KEY = 'fluxozap:facebook-ads:campaign-filter';
+const validDatePresets = new Set(['today', 'yesterday', 'last_7d', 'last_14d', 'last_30d', 'this_month', 'last_month', 'maximum']);
+const validCampaignFilters = new Set(['all', 'active', 'inactive']);
+
+const readStoredPreference = <T extends string>(key: string, validValues: Set<string>, fallback: T): T => {
+  try {
+    const stored = window.localStorage.getItem(key);
+    return stored && validValues.has(stored) ? stored as T : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 const conversionLabel: Record<string, { label: string; classes: string }> = {
   sent: { label: 'Recebida pela Meta', classes: 'bg-emerald-100 text-emerald-800' },
@@ -38,14 +51,14 @@ const conversionLabel: Record<string, { label: string; classes: string }> = {
 
 export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, onOpenSettings }) => {
   const [tab, setTab] = useState<'campaigns' | 'sales'>('campaigns');
-  const [datePreset, setDatePreset] = useState('last_30d');
+  const [datePreset, setDatePreset] = useState(() => readStoredPreference(ADS_DATE_PRESET_KEY, validDatePresets, 'last_30d'));
   const [ads, setAds] = useState<any>(null);
   const [salesData, setSalesData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [updatingCampaign, setUpdatingCampaign] = useState<string | null>(null);
   const [retryingSale, setRetryingSale] = useState<string | null>(null);
-  const [campaignFilter, setCampaignFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [campaignFilter, setCampaignFilter] = useState<'all' | 'active' | 'inactive'>(() => readStoredPreference(ADS_CAMPAIGN_FILTER_KEY, validCampaignFilters, 'all'));
   const [visibleCampaigns, setVisibleCampaigns] = useState(PAGE_SIZE);
   const [visibleSales, setVisibleSales] = useState(PAGE_SIZE);
 
@@ -66,6 +79,14 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
   };
 
   useEffect(() => { load(); }, [accountId, datePreset]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(ADS_DATE_PRESET_KEY, datePreset); } catch { /* storage unavailable */ }
+  }, [datePreset]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(ADS_CAMPAIGN_FILTER_KEY, campaignFilter); } catch { /* storage unavailable */ }
+  }, [campaignFilter]);
 
   useEffect(() => {
     setVisibleCampaigns(PAGE_SIZE);
