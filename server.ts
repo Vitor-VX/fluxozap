@@ -469,6 +469,17 @@ interface XPagPaymentRecord {
   metaConversionError?: string;
   metaConversionKeys?: string[];
   metaConversionResponse?: any;
+  conversionEventTimes?: Record<string, string>;
+  metaConversionAttempts?: Array<{
+    eventId: string;
+    eventTime: string;
+    sentAt: string;
+    success: boolean;
+    reason?: string;
+    supersedesEventId?: string;
+    response?: any;
+    error?: string;
+  }>;
 }
 
 let xpagConfig: XPagConfig = {
@@ -775,12 +786,29 @@ function cleanupExpiredSessions() {
   }
 }
 
-async function sendMetaPurchaseConversion(record: XPagPaymentRecord): Promise<void> {
-  const conversionKey = record.chargeMode === 'open'
+function getMetaConversionKey(record: XPagPaymentRecord): string {
+  return record.chargeMode === 'open'
     ? (record.e2e || record.paidAt || record.updatedAt)
     : record.externalId;
-  if (record.metaConversionKeys?.includes(conversionKey)) return;
-  if (record.chargeMode !== 'open' && record.metaConversionSentAt) return;
+}
+
+function getTrustedConversionEventTime(record: XPagPaymentRecord, conversionKey: string): string {
+  const storedTime = record.conversionEventTimes?.[conversionKey];
+  if (storedTime && Number.isFinite(new Date(storedTime).getTime())) return new Date(storedTime).toISOString();
+
+  // FluxoZap generates updatedAt when it processes the authenticated payment
+  // confirmation. Gateway dates without a timezone remain informational only.
+  const observedAt = new Date(record.updatedAt);
+  return Number.isFinite(observedAt.getTime()) ? observedAt.toISOString() : new Date().toISOString();
+}
+
+async function sendMetaPurchaseConversion(
+  record: XPagPaymentRecord,
+  options: { force?: boolean; reason?: string } = {}
+): Promise<void> {
+  const conversionKey = getMetaConversionKey(record);
+  if (!options.force && record.metaConversionKeys?.includes(conversionKey)) return;
+  if (!options.force && record.chargeMode !== 'open' && record.metaConversionSentAt) return;
   const config = record.accountId ? metaCapiConfigs[record.accountId] : undefined;
   if (!config?.enabled || !config.datasetId || !config.accessToken) return;
   const session = sessions.get(sessionStorageKey(record.accountId, record.sessionPhoneNumber));
@@ -794,7 +822,12 @@ async function sendMetaPurchaseConversion(record: XPagPaymentRecord): Promise<vo
     return;
   }
 
-  const eventId = `xpag_${record.externalId}_${crypto.createHash('sha256').update(conversionKey).digest('hex').slice(0, 16)}`;
+  const eventTime = getTrustedConversionEventTime(record, conversionKey);
+  const previousEventId = options.force ? record.metaConversionEventId : undefined;
+  const eventIdentity = options.force
+    ? `${conversionKey}:${eventTime}:${options.reason || 'correction'}`
+    : conversionKey;
+  const eventId = `xpag_${record.externalId}_${crypto.createHash('sha256').update(eventIdentity).digest('hex').slice(0, 16)}`;
   const userData: any = {
     ph: [crypto.createHash('sha256').update(record.sessionPhoneNumber.replace(/\D/g, '')).digest('hex')],
     external_id: [crypto.createHash('sha256').update(`${record.accountId}:${record.sessionPhoneNumber}`).digest('hex')],
@@ -806,7 +839,7 @@ async function sendMetaPurchaseConversion(record: XPagPaymentRecord): Promise<vo
   const payload: any = {
     data: [{
       event_name: 'Purchase',
-      event_time: Math.floor(new Date(record.paidAt || Date.now()).getTime() / 1000),
+      event_time: Math.floor(new Date(eventTime).getTime() / 1000),
       event_id: eventId,
       action_source: hasBusinessAttribution ? 'business_messaging' : 'chat',
       messaging_channel: 'whatsapp',
@@ -839,14 +872,34 @@ async function sendMetaPurchaseConversion(record: XPagPaymentRecord): Promise<vo
       metaErrorMessage: response.ok ? undefined : responseBody?.error?.message,
     });
     if (!response.ok) throw new Error(responseBody?.error?.message || `Meta CAPI HTTP ${response.status}`);
-    record.metaConversionSentAt = new Date().toISOString();
+    const sentAt = new Date().toISOString();
+    record.metaConversionSentAt = sentAt;
     record.metaConversionEventId = eventId;
     record.metaConversionError = undefined;
     record.metaConversionResponse = responseBody;
-    record.metaConversionKeys = [...(record.metaConversionKeys || []), conversionKey];
+    record.metaConversionKeys = Array.from(new Set([...(record.metaConversionKeys || []), conversionKey]));
+    record.metaConversionAttempts = [...(record.metaConversionAttempts || []), {
+      eventId,
+      eventTime,
+      sentAt,
+      success: true,
+      reason: options.reason,
+      supersedesEventId: previousEventId,
+      response: responseBody,
+    }];
   } catch (err: any) {
     record.metaConversionError = err.message || 'Falha ao enviar conversão à Meta.';
     record.metaConversionResponse = err.responseBody || undefined;
+    record.metaConversionAttempts = [...(record.metaConversionAttempts || []), {
+      eventId,
+      eventTime,
+      sentAt: new Date().toISOString(),
+      success: false,
+      reason: options.reason,
+      supersedesEventId: previousEventId,
+      response: err.responseBody,
+      error: record.metaConversionError,
+    }];
   }
   saveXPagPayments();
 }
@@ -2785,6 +2838,8 @@ async function startServer() {
             eventId: payment.metaConversionEventId,
             error: payment.metaConversionError,
             response: payment.metaConversionResponse,
+            eventTime: payment.metaConversionAttempts?.at(-1)?.eventTime,
+            attempts: payment.metaConversionAttempts || [],
           },
         };
       });
@@ -2806,11 +2861,32 @@ async function startServer() {
     const payment = xpagPayments.get(String(req.params.externalId));
     if (!payment || payment.accountId !== accountId) return res.status(404).json({ success: false, error: 'Venda não encontrada nesta linha.' });
     if (payment.status !== 'confirmed') return res.status(409).json({ success: false, error: 'Somente pagamentos confirmados podem reenviar a conversão.' });
-    if (payment.metaConversionSentAt) return res.json({ success: true, message: 'Esta conversão já foi aceita pela Meta.', payment });
+    const forceCorrection = req.body?.forceCorrection === true;
+    if (payment.metaConversionSentAt && !forceCorrection) return res.json({ success: true, message: 'Esta conversão já foi recebida pela Meta.', payment });
+    const conversionKey = getMetaConversionKey(payment);
+    if (forceCorrection) {
+      const observedAt = Number.isFinite(new Date(payment.updatedAt).getTime())
+        ? new Date(payment.updatedAt).toISOString()
+        : new Date().toISOString();
+      payment.conversionEventTimes = { ...(payment.conversionEventTimes || {}), [conversionKey]: observedAt };
+      if (payment.metaConversionEventId && !(payment.metaConversionAttempts || []).some((attempt) => attempt.eventId === payment.metaConversionEventId)) {
+        payment.metaConversionAttempts = [...(payment.metaConversionAttempts || []), {
+          eventId: payment.metaConversionEventId,
+          eventTime: payment.paidAt || payment.updatedAt,
+          sentAt: payment.metaConversionSentAt || payment.updatedAt,
+          success: true,
+          reason: 'legacy_gateway_time',
+          response: payment.metaConversionResponse,
+        }];
+      }
+    }
     payment.metaConversionError = undefined;
-    await sendMetaPurchaseConversion(payment);
-    const success = Boolean(payment.metaConversionSentAt);
-    res.status(success ? 200 : 400).json({ success, message: success ? 'Conversão reenviada e aceita pela Meta.' : payment.metaConversionError || 'A Meta não confirmou o evento.', payment });
+    await sendMetaPurchaseConversion(payment, forceCorrection ? { force: true, reason: 'event_time_correction' } : {});
+    const latestAttempt = payment.metaConversionAttempts?.at(-1);
+    const success = forceCorrection
+      ? Boolean(latestAttempt?.success && latestAttempt.reason === 'event_time_correction')
+      : Boolean(payment.metaConversionSentAt && !payment.metaConversionError);
+    res.status(success ? 200 : 400).json({ success, message: success ? 'Conversão reenviada e recebida pela Meta.' : payment.metaConversionError || 'A Meta não confirmou o evento.', payment });
   });
 
   // Persist outbound flow media in R2. Unlike received media, this endpoint
@@ -3427,9 +3503,12 @@ async function startServer() {
       record.amount = verifiedAmount;
       record.e2e = verifiedE2e || record.e2e;
       if (verifiedE2e) record.receivedE2es.push(verifiedE2e);
-      record.paidAt = normalizeXPagDate(firstXPagValue(verificationData.paid_at, verificationData.confirmed_at)) || new Date().toISOString();
+      const confirmedAt = new Date().toISOString();
+      record.paidAt = normalizeXPagDate(firstXPagValue(verificationData.paid_at, verificationData.confirmed_at)) || confirmedAt;
       record.response = { ...record.response, verification, webhook: event };
-      record.updatedAt = new Date().toISOString();
+      record.updatedAt = confirmedAt;
+      const conversionKey = getMetaConversionKey(record);
+      record.conversionEventTimes = { ...(record.conversionEventTimes || {}), [conversionKey]: confirmedAt };
       saveXPagPayments();
       await sendMetaPurchaseConversion(record);
       await resumeXPagFlowBranch(record, 'paid', record.response);
