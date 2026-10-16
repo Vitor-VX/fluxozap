@@ -2836,9 +2836,18 @@ async function startServer() {
       }
       return data;
     };
-    const actionValue = (actions: any, names: string[]): number => {
+    const preferredActionValue = (actions: any, namesByPriority: string[]): number => {
       if (!Array.isArray(actions)) return 0;
-      return actions.filter((item: any) => names.includes(String(item.action_type))).reduce((sum: number, item: any) => sum + (Number(item.value) || 0), 0);
+      // Meta exposes the same purchase under overlapping aliases (for example,
+      // omni_purchase and onsite_conversion.purchase). Choose one canonical
+      // alias and use the others only as fallbacks so a sale is counted once.
+      for (const actionType of namesByPriority) {
+        const matchingItems = actions.filter((item: any) => String(item.action_type) === actionType);
+        if (matchingItems.length > 0) {
+          return matchingItems.reduce((sum: number, item: any) => sum + (Number(item.value) || 0), 0);
+        }
+      }
+      return 0;
     };
     try {
       const campaignFields = 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,updated_time';
@@ -2866,11 +2875,11 @@ async function startServer() {
       ]);
       const insightRows = Array.isArray(insightPayload?.data) ? insightPayload.data : [];
       const insightMap = new Map(insightRows.map((row: any) => [String(row.campaign_id), row]));
-      const purchaseNames = ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_conversion.purchase'];
+      const purchaseNames = ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_conversion.purchase', 'purchase'];
       const campaigns = campaignRows.map((campaign: any) => {
         const insight: any = insightMap.get(String(campaign.id)) || {};
-        const purchases = actionValue(insight.actions, purchaseNames);
-        const purchaseValue = actionValue(insight.action_values, purchaseNames);
+        const purchases = preferredActionValue(insight.actions, purchaseNames);
+        const purchaseValue = preferredActionValue(insight.action_values, purchaseNames);
         const spend = Number(insight.spend) || 0;
         return {
           ...campaign,
@@ -2893,8 +2902,8 @@ async function startServer() {
       const totals: any = after ? null : {
         impressions: Number(totalInsight.impressions) || 0, reach: Number(totalInsight.reach) || 0,
         clicks: Number(totalInsight.clicks) || 0, spend: Number(totalInsight.spend) || 0,
-        purchases: actionValue(totalInsight.actions, purchaseNames),
-        purchaseValue: actionValue(totalInsight.action_values, purchaseNames),
+        purchases: preferredActionValue(totalInsight.actions, purchaseNames),
+        purchaseValue: preferredActionValue(totalInsight.action_values, purchaseNames),
       };
       if (totals) {
         totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
