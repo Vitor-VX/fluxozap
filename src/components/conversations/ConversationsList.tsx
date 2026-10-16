@@ -38,6 +38,29 @@ interface ConversationsListProps {
   activeAccountId?: string;
 }
 
+const BRASILIA_TIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
+  timeZone: 'America/Sao_Paulo',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+function formatConversationTime(value: string): string {
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime()) && /[T-]/.test(value)) return BRASILIA_TIME_FORMATTER.format(parsed);
+
+  // Historic records stored a locale-formatted 12-hour clock without timezone.
+  // Normalize those labels to the Brazilian 24-hour clock while new records are
+  // generated directly in America/Sao_Paulo on the server.
+  const twelveHour = value.trim().match(/^(\d{1,2}):(\d{2})(?:\s*:\d{2})?\s*([AP]M)$/i);
+  if (twelveHour) {
+    let hour = Number(twelveHour[1]) % 12;
+    if (twelveHour[3].toUpperCase() === 'PM') hour += 12;
+    return `${String(hour).padStart(2, '0')}:${twelveHour[2]}`;
+  }
+  return value;
+}
+
 export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts = [], activeAccountId }) => {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<UserSession | null>(null);
@@ -554,7 +577,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-slate-900 truncate text-xs">{contactName}</span>
                       <span className="text-[10px] text-slate-400">
-                        {new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {formatConversationTime(item.updatedAt)}
                       </span>
                     </div>
 
@@ -817,7 +840,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                           <span>
                             {isUser ? 'Cliente' : isAgent ? 'Atendente Humano' : 'Robô FluxoZap'}
                           </span>
-                          <span>{msg.timestamp}</span>
+                          <span>{formatConversationTime(msg.timestamp)}</span>
                         </div>
 
                         {msg.replyTo && (

@@ -28,7 +28,7 @@ import { EndNode } from './EndNode';
 import { NodeSidebar } from './NodeSidebar';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { NodeType, FlowNodeData } from '../../types/flow';
-import { Save, Check, Download, Upload } from 'lucide-react';
+import { Save, Check, Download, Upload, Trash2 } from 'lucide-react';
 
 interface FlowEditorProps {
   onFlowSaved?: () => void;
@@ -45,6 +45,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
     data: FlowNodeData;
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -455,6 +456,55 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
     }
   };
 
+  const handleClearFlow = async () => {
+    const targetName = accountName || 'Principal';
+    if (!window.confirm(`Limpar o funil de "${targetName}"? Todos os blocos e conexões serão removidos, mantendo apenas o bloco inicial. Esta ação será salva imediatamente no banco de dados.`)) return;
+
+    const startNode: Node = {
+      id: `node_start_${accountId || 'main'}`,
+      type: 'start',
+      position: { x: 100, y: 150 },
+      data: {
+        label: 'Início do Fluxo 1',
+        type: 'start',
+        triggerType: 'all',
+        triggerKeywords: [],
+      },
+    };
+    const saveUrl = accountId ? `/api/flow?accountId=${encodeURIComponent(accountId)}` : '/api/flow';
+    setIsClearing(true);
+    setTransferMessage(null);
+    try {
+      const response = await fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: accountId ? `flow_${accountId}` : 'flow_main',
+          name: accountName ? `Fluxo - ${accountName}` : 'Fluxo WhatsApp',
+          description: 'Fluxo de automação oficial',
+          triggerType: 'all',
+          triggerKeywords: [],
+          nodes: [startNode],
+          edges: [],
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Não foi possível limpar o funil.');
+      setNodes([startNode]);
+      setEdges([]);
+      setSelectedNode(null);
+      setSaveSuccess(false);
+      setTransferMessage('Funil limpo e salvo. Apenas o bloco inicial foi mantido.');
+      if (onFlowSaved) onFlowSaved();
+      window.setTimeout(() => reactFlowInstance?.fitView({ padding: 0.3, duration: 300 }), 50);
+      window.setTimeout(() => setTransferMessage(null), 3000);
+    } catch (error: any) {
+      setTransferMessage(error.message || 'Não foi possível limpar o funil.');
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   return (
     <div className="flex h-full w-full bg-slate-50 relative overflow-hidden">
       {/* Sidebar toolbox with available node types */}
@@ -493,6 +543,15 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ onFlowSaved, accountId, 
             </button>
             <button type="button" onClick={handleExportFlow} disabled={nodes.length === 0} className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50 disabled:opacity-50">
               <Download className="w-3.5 h-3.5" /> Exportar
+            </button>
+            <button
+              type="button"
+              onClick={handleClearFlow}
+              disabled={isClearing || isSaving}
+              className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-semibold text-rose-700 shadow-xs hover:bg-rose-50 disabled:opacity-50"
+            >
+              <Trash2 className={`w-3.5 h-3.5 ${isClearing ? 'animate-pulse' : ''}`} />
+              {isClearing ? 'Limpando...' : 'Limpar funil'}
             </button>
             <button
               type="button"

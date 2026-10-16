@@ -20,6 +20,7 @@ export interface WhatsAppAccount {
   accessToken?: string; // Token específico (ou usa o global se vazio)
   verifyToken?: string;
   ctwaDatasetId?: string; // Dataset de eventos CTWA vinculado à WABA
+  registrationStatus?: 'registered' | 'unknown';
   isDefault?: boolean;
   color?: string; // Cor temática para crachá (emerald, blue, purple, amber, indigo, etc.)
   flow?: FlowDefinition; // Fluxo exclusivo deste número de WhatsApp

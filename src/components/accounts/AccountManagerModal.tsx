@@ -51,6 +51,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
     phoneNumberId: '',
     wabaId: '',
     accessToken: '',
+    registrationPin: '',
     color: 'emerald',
     isDefault: false,
   });
@@ -59,8 +60,8 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.phoneNumberId.trim()) {
-      setError('Informe ao menos o Nome e o Phone Number ID da Meta.');
+    if (!formData.name.trim() || !formData.phoneNumberId.trim() || !/^\d{6}$/.test(formData.registrationPin.trim())) {
+      setError('Informe o Nome, o Phone Number ID e o PIN de 6 dígitos da verificação em duas etapas.');
       return;
     }
 
@@ -83,6 +84,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
           phoneNumberId: '',
           wabaId: '',
           accessToken: '',
+          registrationPin: '',
           color: 'blue',
           isDefault: false,
         });
@@ -91,7 +93,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
           onSelectAccount(data.account.id);
         }
       } else {
-        setError(data.error || 'Erro ao cadastrar novo número de WhatsApp.');
+        setError([data.error, data.diagnosticTip].filter(Boolean).join(' ' ) || 'Erro ao cadastrar novo número de WhatsApp.');
       }
     } catch (err: any) {
       setError(err.message || 'Erro de conexão.');
@@ -361,17 +363,37 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Access Token Específico (Opcional)
-                </label>
-                <input
-                  type="password"
-                  value={formData.accessToken}
-                  onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
-                  placeholder="Se deixar em branco, usará o Access Token global da configuração"
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Access Token Específico (Opcional)
+                  </label>
+                  <input
+                    type="password"
+                    value={formData.accessToken}
+                    onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
+                    placeholder="Em branco, usa o token global"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    PIN da verificação em duas etapas *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    autoComplete="new-password"
+                    value={formData.registrationPin}
+                    onChange={(e) => setFormData({ ...formData, registrationPin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                    placeholder="6 dígitos"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Usado apenas no registro e nunca armazenado.</p>
+                </div>
               </div>
 
               {/* Color picker */}
@@ -423,7 +445,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                   ) : (
                     <Check className="w-3.5 h-3.5" />
                   )}
-                  <span>Salvar Número</span>
+                  <span>Registrar e salvar número</span>
                 </button>
               </div>
             </form>

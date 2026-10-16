@@ -31,6 +31,33 @@ const XPAG_CONFIG_FILE = path.join(DATA_DIR, 'xpag_config.json');
 const XPAG_PAYMENTS_FILE = path.join(DATA_DIR, 'xpag_payments.json');
 const META_CAPI_CONFIG_FILE = path.join(DATA_DIR, 'meta_capi_config.json');
 const SESSION_RETENTION_DAYS = 17;
+const CHAT_TIME_ZONE = 'America/Sao_Paulo';
+const META_GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v26.0';
+
+function formatBrasiliaTime(value: Date | number | string = new Date()): string {
+  const date = value instanceof Date ? value : new Date(value);
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: CHAT_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+}
+
+function formatBrasiliaDateTime(value: Date | number | string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: CHAT_TIME_ZONE,
+    dateStyle: 'short',
+    timeStyle: 'medium',
+    hourCycle: 'h23',
+  }).format(date);
+}
+
+function metaMessageDate(timestamp?: string | number): Date {
+  const seconds = Number(timestamp);
+  return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000) : new Date();
+}
 
 // Interface for API Logs
 interface ApiLogEntry {
@@ -319,6 +346,7 @@ interface WhatsAppAccount {
   accessToken?: string;
   verifyToken?: string;
   ctwaDatasetId?: string;
+  registrationStatus?: 'registered' | 'unknown';
   isDefault?: boolean;
   color?: string;
   flow?: any;
@@ -1020,8 +1048,8 @@ function scheduleNextNodeDelay(
     id: `node_delay_${Date.now()}`,
     sender: 'system',
     type: 'info',
-    content: `Próximo bloco agendado para ${dueAt.toLocaleString('pt-BR')}.`,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    content: `Próximo bloco agendado para ${formatBrasiliaDateTime(dueAt)} (Brasília).`,
+    timestamp: formatBrasiliaTime(),
   });
   persistSession(session);
   return true;
@@ -1599,7 +1627,7 @@ async function sendMetaWhatsAppMessage(
 ): Promise<{ success: boolean; data?: any; error?: string; logEntry?: ApiLogEntry }> {
   const cleanPhone = recipientPhone.replace(/\D/g, '');
   const activePhoneNumberId = accountOverride ? accountOverride.phoneNumberId : metaConfig.phoneNumberId;
-  const activeAccessToken = accountOverride ? accountOverride.accessToken : metaConfig.accessToken;
+  const activeAccessToken = accountOverride?.accessToken || metaConfig.accessToken;
   const endpoint = `POST /v21.0/${activePhoneNumberId || '{phoneNumberId}'}/messages`;
 
   if (!activePhoneNumberId || !activeAccessToken) {
@@ -1776,7 +1804,7 @@ async function runFlowStep(
       sender: 'system',
       type: 'info',
       content: '⏳ A cobrança ainda está pendente. O funil continuará automaticamente assim que a XPag confirmar o pagamento.',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
     persistSession(session);
@@ -1788,8 +1816,8 @@ async function runFlowStep(
       id: `delay_pending_${Date.now()}`,
       sender: 'system',
       type: 'info',
-      content: `Funil aguardando o prazo agendado (${new Date(session.waitingUntil).toLocaleString('pt-BR')}).`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      content: `Funil aguardando o prazo agendado (${formatBrasiliaDateTime(session.waitingUntil)} — Brasília).`,
+      timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
     persistSession(session);
@@ -1843,7 +1871,7 @@ async function runFlowStep(
         sender: 'bot' as const,
         type: 'text' as const,
         content: parsedText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBrasiliaTime(),
       };
       session.history.push(msgItem);
 
@@ -1869,7 +1897,7 @@ async function runFlowStep(
         type: 'image' as const,
         content: parsedCaption,
         mediaUrl: parsedMediaUrl,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBrasiliaTime(),
       };
       session.history.push(msgItem);
 
@@ -1901,7 +1929,7 @@ async function runFlowStep(
         content: '[Mensagem de Voz / Áudio]',
         mediaUrl: parsedMediaUrl,
         filename: currentNode.data.filename || 'audio.mp3',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBrasiliaTime(),
       };
       session.history.push(msgItem);
 
@@ -1934,7 +1962,7 @@ async function runFlowStep(
         content: parsedCaption || '[Vídeo Enviado]',
         mediaUrl: parsedMediaUrl,
         caption: parsedCaption,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBrasiliaTime(),
       };
       session.history.push(msgItem);
 
@@ -1967,7 +1995,7 @@ async function runFlowStep(
         content: parsedCaption,
         mediaUrl: parsedMediaUrl,
         filename: currentNode.data.filename || 'documento.pdf',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBrasiliaTime(),
       };
       session.history.push(msgItem);
 
@@ -2028,7 +2056,7 @@ async function runFlowStep(
           content: isOpenSpei
             ? '🧪 Variáveis simuladas para uma CLABE SPEI de valor aberto. Nenhuma transação real foi criada.'
             : `🧪 Variáveis simuladas para uma cobrança ${method} de ${simulatedAmount} ${currency}. Nenhuma transação real foi criada.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: formatBrasiliaTime(),
         });
         const simulationEdge = generatedEdge || edges.find(
           (edge: any) => edge.source === currentNode.id && !edge.sourceHandle
@@ -2124,8 +2152,8 @@ async function runFlowStep(
           id: `delay_scheduled_${Date.now()}`,
           sender: 'system',
           type: 'info',
-          content: `Execução agendada para ${new Date(session.waitingUntil!).toLocaleString('pt-BR')}.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          content: `Execução agendada para ${formatBrasiliaDateTime(session.waitingUntil!)} (Brasília).`,
+          timestamp: formatBrasiliaTime(),
         });
         persistSession(session);
         return { executionErrors, lastLog };
@@ -2148,7 +2176,7 @@ async function runFlowStep(
         sender: 'system',
         type: 'info',
         content: 'Funil finalizado. Novas mensagens não reiniciarão esta execução automaticamente.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBrasiliaTime(),
       });
       break;
     }
@@ -2219,7 +2247,7 @@ async function resumeDurableWait(session: SessionData): Promise<void> {
         : waitKind === 'node_delay'
           ? 'O intervalo entre os blocos terminou; retomando o funil.'
           : 'O prazo agendado terminou; retomando o funil.',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: formatBrasiliaTime(),
     });
     const waitNode = activeFlow.nodes?.find((node: any) => node.id === waitNodeId);
     if (waitKind === 'reply_timeout' && nextNodeId && waitNode) {
@@ -2309,7 +2337,7 @@ async function resumeXPagFlowBranch(
       : branch === 'expired'
         ? 'Cobrança XPag expirada; continuando pela saída Expirada.'
         : 'Cobrança XPag encerrada com erro; continuando pela saída Erro.',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    timestamp: formatBrasiliaTime(),
   });
 
   const outgoingEdge = activeFlow.edges?.find(
@@ -2374,7 +2402,7 @@ async function handleIncomingUserMessage(
   session: SessionData,
   userMessageText: string,
   isLiveWhatsApp: boolean = false,
-  incomingMessage?: { id?: string; replyToMessageId?: string }
+  incomingMessage?: { id?: string; replyToMessageId?: string; timestamp?: string | number }
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
   // Update customer window: last message received now
   const now = new Date();
@@ -2402,7 +2430,7 @@ async function handleIncomingUserMessage(
     sender: 'user',
     type: 'text',
     content: userMessageText,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    timestamp: formatBrasiliaTime(metaMessageDate(incomingMessage?.timestamp)),
     replyTo: incomingMessage?.replyToMessageId ? (() => {
       const original = session.history.find((item) => item.id === incomingMessage.replyToMessageId);
       return original ? { messageId: original.id, sender: original.sender, content: original.content, type: original.type } : undefined;
@@ -2432,7 +2460,7 @@ async function handleIncomingUserMessage(
       sender: 'system',
       type: 'info',
       content: '⏳ Pagamento ainda pendente. O funil continuará automaticamente após a confirmação da XPag.',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
     persistSession(session);
@@ -2488,7 +2516,7 @@ async function handleIncomingUserMessage(
       content: `ℹ️ O funil não foi disparado porque o gatilho está configurado para: ${
         triggerType === 'exact' ? 'mensagem exata' : 'palavras-chave'
       } (${keywords.map((k) => `"${k}"`).join(', ')}). Envie a mensagem correspondente para ativar o robô.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
     persistSession(session);
@@ -3737,6 +3765,51 @@ async function startServer() {
     }
   });
 
+  async function registerWhatsAppPhoneNumber(input: {
+    phoneNumberId: string;
+    accessToken: string;
+    pin: string;
+    accountName: string;
+  }): Promise<any> {
+    const endpoint = `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${encodeURIComponent(input.phoneNumberId)}/register`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ messaging_product: 'whatsapp', pin: input.pin }),
+    });
+    const responseBody: any = await response.json().catch(() => ({}));
+    const diagnostic = analyzeMetaError(response.status, responseBody);
+    addApiLog({
+      type: 'integration',
+      direction: 'outbound',
+      endpoint: `POST /${META_GRAPH_API_VERSION}/${input.phoneNumberId}/register`,
+      accountName: input.accountName,
+      phoneNumberId: input.phoneNumberId,
+      messageType: 'register_whatsapp_phone_number',
+      httpStatus: response.status,
+      success: response.ok && responseBody?.success !== false,
+      requestPayload: { messaging_product: 'whatsapp', pin: '[REDACTED]' },
+      responseBody,
+      metaErrorCode: diagnostic.code,
+      metaErrorSubcode: diagnostic.subcode,
+      metaErrorMessage: response.ok ? undefined : diagnostic.message,
+      metaErrorType: diagnostic.type,
+      metaFbTraceId: diagnostic.fbtrace_id,
+      diagnosticTip: response.ok ? undefined : diagnostic.tip,
+    });
+    if (!response.ok || responseBody?.success === false) {
+      const error: any = new Error(`A Meta não registrou o número: ${diagnostic.message}`);
+      error.status = response.status >= 400 && response.status < 500 ? response.status : 502;
+      error.meta = responseBody?.error;
+      error.diagnosticTip = diagnostic.tip;
+      throw error;
+    }
+    return responseBody;
+  }
+
   // API: Multiple WhatsApp Accounts / Phone Numbers Management
   app.get('/api/accounts', (_req: Request, res: Response) => {
     res.json(whatsappAccounts.map(({ flow: _flow, ...account }) => account));
@@ -3750,13 +3823,30 @@ async function startServer() {
           error: 'MongoDB indisponível. Não é possível criar uma linha sem persistir seu Fluxo 1 no banco.',
         });
       }
-      const { name, phoneNumber, phoneNumberId, wabaId, accessToken, color, isDefault } = req.body;
+      const { name, phoneNumber, phoneNumberId, wabaId, accessToken, registrationPin, color, isDefault } = req.body;
       if (!name || !phoneNumberId) {
         return res.status(400).json({ success: false, error: 'Nome e Phone Number ID são obrigatórios.' });
       }
-      if (whatsappAccounts.some((account) => account.phoneNumberId === phoneNumberId.trim())) {
+      const normalizedPhoneNumberId = String(phoneNumberId).trim();
+      const normalizedAccessToken = String(accessToken || '').trim();
+      const effectiveAccessToken = normalizedAccessToken || metaConfig.accessToken.trim();
+      const normalizedRegistrationPin = String(registrationPin || '').trim();
+      if (!effectiveAccessToken) {
+        return res.status(400).json({ success: false, error: 'Informe o Access Token específico ou configure um token global antes de registrar o número.' });
+      }
+      if (!/^\d{6}$/.test(normalizedRegistrationPin)) {
+        return res.status(400).json({ success: false, error: 'Informe o PIN de 6 dígitos da verificação em duas etapas para registrar o número na Meta.' });
+      }
+      if (whatsappAccounts.some((account) => account.phoneNumberId === normalizedPhoneNumberId)) {
         return res.status(409).json({ success: false, error: 'Este Phone Number ID já pertence a outra linha cadastrada.' });
       }
+
+      await registerWhatsAppPhoneNumber({
+        phoneNumberId: normalizedPhoneNumberId,
+        accessToken: effectiveAccessToken,
+        pin: normalizedRegistrationPin,
+        accountName: String(name).trim(),
+      });
 
       const newId = `acc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       
@@ -3769,10 +3859,11 @@ async function startServer() {
         id: newId,
         name: name.trim(),
         phoneNumber: (phoneNumber || '').trim(),
-        phoneNumberId: phoneNumberId.trim(),
+        phoneNumberId: normalizedPhoneNumberId,
         wabaId: (wabaId || '').trim(),
-        accessToken: (accessToken || '').trim(),
+        accessToken: normalizedAccessToken,
         verifyToken: metaConfig.verifyToken,
+        registrationStatus: 'registered',
         isDefault: Boolean(isDefault) || whatsappAccounts.length === 0,
         color: color || 'blue',
         flow: createEmptyAccountFlow(newId, name.trim()),
@@ -3786,11 +3877,11 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: `Novo número ${newAccount.name} adicionado com sucesso!`,
+        message: `Número ${newAccount.name} registrado na Meta e adicionado com sucesso!`,
         account: newAccount,
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(err.status || 500).json({ success: false, error: err.message, meta: err.meta, diagnosticTip: err.diagnosticTip });
     }
   });
 
@@ -4211,14 +4302,14 @@ async function startServer() {
 
               if (msg.type === 'text') {
                 textContent = msg.text.body;
-                await handleIncomingUserMessage(session, textContent, true, { id: msg.id, replyToMessageId: msg.context?.id });
+                await handleIncomingUserMessage(session, textContent, true, { id: msg.id, replyToMessageId: msg.context?.id, timestamp: msg.timestamp });
               } else if (msg.type === 'image') {
                 textContent = msg.image?.caption || '[Foto Recebida]';
                 // Download and save image in Cloudflare R2 / local
                 const mediaId = msg.image?.id;
                 let mediaUrl = '';
-                if (mediaId && matchedAccount.accessToken) {
-                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken, 'foto.jpg');
+                if (mediaId && (matchedAccount.accessToken || metaConfig.accessToken)) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken || metaConfig.accessToken, 'foto.jpg');
                   if (saved?.url) mediaUrl = saved.url;
                   if (saved?.rejectedReason) textContent = `${textContent} — ${saved.rejectedReason}`;
                 }
@@ -4231,7 +4322,7 @@ async function startServer() {
                   mediaUrl: mediaUrl || undefined,
                   caption: msg.image?.caption,
                   replyTo: inboundReply,
-                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  timestamp: formatBrasiliaTime(metaMessageDate(msg.timestamp)),
                 });
 
                 if (!session.botPaused) {
@@ -4243,8 +4334,8 @@ async function startServer() {
                 textContent = '[Áudio de Voz Recebido]';
                 const mediaId = msg.audio?.id || msg.voice?.id;
                 let mediaUrl = '';
-                if (mediaId && matchedAccount.accessToken) {
-                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken, 'audio.ogg');
+                if (mediaId && (matchedAccount.accessToken || metaConfig.accessToken)) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken || metaConfig.accessToken, 'audio.ogg');
                   if (saved?.url) mediaUrl = saved.url;
                   if (saved?.rejectedReason) textContent = `${textContent} — ${saved.rejectedReason}`;
                 }
@@ -4256,7 +4347,7 @@ async function startServer() {
                   content: textContent,
                   mediaUrl: mediaUrl || undefined,
                   replyTo: inboundReply,
-                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  timestamp: formatBrasiliaTime(metaMessageDate(msg.timestamp)),
                 });
 
                 if (!session.botPaused) {
@@ -4268,8 +4359,8 @@ async function startServer() {
                 textContent = msg.document?.caption || msg.document?.filename || '[Documento Recebido]';
                 const mediaId = msg.document?.id;
                 let mediaUrl = '';
-                if (mediaId && matchedAccount.accessToken) {
-                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken, msg.document?.filename || 'documento.pdf');
+                if (mediaId && (matchedAccount.accessToken || metaConfig.accessToken)) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken || metaConfig.accessToken, msg.document?.filename || 'documento.pdf');
                   if (saved?.url) mediaUrl = saved.url;
                   if (saved?.rejectedReason) textContent = `${textContent} — ${saved.rejectedReason}`;
                 }
@@ -4283,7 +4374,7 @@ async function startServer() {
                   filename: msg.document?.filename,
                   caption: msg.document?.caption,
                   replyTo: inboundReply,
-                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  timestamp: formatBrasiliaTime(metaMessageDate(msg.timestamp)),
                 });
 
                 if (!session.botPaused) {
@@ -4295,8 +4386,8 @@ async function startServer() {
                 textContent = msg.video?.caption || '[Vídeo Recebido]';
                 const mediaId = msg.video?.id;
                 let mediaUrl = '';
-                if (mediaId && matchedAccount.accessToken) {
-                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken, 'video.mp4');
+                if (mediaId && (matchedAccount.accessToken || metaConfig.accessToken)) {
+                  const saved = await r2StorageService.downloadAndSaveMetaMedia(mediaId, matchedAccount.accessToken || metaConfig.accessToken, 'video.mp4');
                   if (saved?.url) mediaUrl = saved.url;
                   if (saved?.rejectedReason) textContent = `${textContent} — ${saved.rejectedReason}`;
                 }
@@ -4309,7 +4400,7 @@ async function startServer() {
                   mediaUrl: mediaUrl || undefined,
                   caption: msg.video?.caption,
                   replyTo: inboundReply,
-                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  timestamp: formatBrasiliaTime(metaMessageDate(msg.timestamp)),
                 });
 
                 if (!session.botPaused) {
@@ -4440,7 +4531,7 @@ async function startServer() {
         mediaUrl: mediaId ? undefined : mediaUrl,
         filename,
         caption,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatBrasiliaTime(),
         status: sendResult.success ? 'delivered' : 'failed',
         replyTo: replyToMessageId ? (() => {
           const original = session.history.find((item) => item.id === replyToMessageId);
