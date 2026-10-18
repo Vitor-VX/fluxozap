@@ -30,12 +30,25 @@ import {
   Copy,
   Reply,
   X,
+  Check,
+  CheckCheck,
 } from 'lucide-react';
 import { UserSession, ChatMessage, WhatsAppAccount } from '../../types/flow';
 
 interface ConversationsListProps {
   accounts?: WhatsAppAccount[];
   activeAccountId?: string;
+  openConversationTarget?: { accountId: string; phoneNumber: string } | null;
+  onConversationTargetHandled?: () => void;
+}
+
+interface PendingMediaUpload {
+  key: string;
+  type: 'image' | 'document';
+  mediaId: string;
+  mediaMimeType: string;
+  filename: string;
+  previewUrl?: string;
 }
 
 const BRASILIA_TIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
@@ -61,7 +74,24 @@ function formatConversationTime(value: string): string {
   return value;
 }
 
-export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts = [], activeAccountId }) => {
+function MessageDeliveryStatus({ status }: { status?: ChatMessage['status'] }) {
+  if (!status) return null;
+  if (status === 'failed') return <span className="font-bold text-rose-600" title="Falha no envio">!</span>;
+  if (status === 'sent') return <Check className="h-3 w-3 text-slate-500" aria-label="Enviada" />;
+  return (
+    <CheckCheck
+      className={`h-3.5 w-3.5 ${status === 'read' ? 'text-blue-500' : 'text-slate-500'}`}
+      aria-label={status === 'read' ? 'Visualizada' : 'Entregue'}
+    />
+  );
+}
+
+export const ConversationsList: React.FC<ConversationsListProps> = ({
+  accounts = [],
+  activeAccountId,
+  openConversationTarget,
+  onConversationTargetHandled,
+}) => {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<UserSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -73,11 +103,9 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
   // Agent chat input state
   const [agentText, setAgentText] = useState('');
   const [agentMediaType, setAgentMediaType] = useState<'text' | 'image' | 'document'>('text');
-  const [agentMediaId, setAgentMediaId] = useState('');
   const [agentMediaUrl, setAgentMediaUrl] = useState('');
-  const [agentMediaMimeType, setAgentMediaMimeType] = useState('');
   const [agentCaption, setAgentCaption] = useState('');
-  const [agentFilename, setAgentFilename] = useState('');
+  const [pendingMediaUploads, setPendingMediaUploads] = useState<PendingMediaUpload[]>([]);
   const [isSendingAgent, setIsSendingAgent] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [flowRestoredNotice, setFlowRestoredNotice] = useState<string | null>(null);
@@ -127,18 +155,29 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     setSelectedSession(null);
     setShowCollectedVariables(false);
     setAgentText('');
-    if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
-    setAgentMediaId('');
+    setPendingMediaUploads((current) => {
+      current.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+      return [];
+    });
     setAgentMediaUrl('');
-    setAgentMediaMimeType('');
     setAgentCaption('');
-    setAgentFilename('');
     setSendError(null);
     setReplyingTo(null);
     fetchSessions(false, activeAccountId);
     const interval = setInterval(() => fetchSessions(true, activeAccountId), 4000);
     return () => clearInterval(interval);
   }, [activeAccountId]);
+
+  useEffect(() => {
+    if (!openConversationTarget || openConversationTarget.accountId !== activeAccountId || sessions.length === 0) return;
+    const cleanTarget = openConversationTarget.phoneNumber.replace(/\D/g, '');
+    const targetSession = sessions.find((session) => session.phoneNumber.replace(/\D/g, '') === cleanTarget);
+    if (!targetSession) return;
+    shouldStickToBottomRef.current = true;
+    setSelectedSession(targetSession);
+    setReplyingTo(null);
+    onConversationTargetHandled?.();
+  }, [activeAccountId, openConversationTarget, onConversationTargetHandled, sessions]);
 
   useEffect(() => {
     if (!selectedSession) return;
@@ -192,44 +231,54 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
       return;
     }
     if (agentMediaType === 'text' && !agentText.trim()) return;
-    if (agentMediaType !== 'text' && !agentMediaId && !agentMediaUrl.trim()) return;
+    const externalUrls = agentMediaUrl.split(/\r?\n/).map((url) => url.trim()).filter(Boolean);
+    if (agentMediaType !== 'text' && pendingMediaUploads.length === 0 && externalUrls.length === 0) return;
 
     setIsSendingAgent(true);
     setSendError(null);
 
     try {
-      const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}/send-agent-message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: agentMediaType,
-          text: agentText,
-          mediaId: agentMediaId,
-          mediaUrl: agentMediaId ? undefined : agentMediaUrl,
-          mediaMimeType: agentMediaMimeType,
-          caption: agentCaption,
-          filename: agentFilename,
-          pauseBot: true, // Agent takes over
-          accountId: selectedSession.accountId,
-          replyToMessageId: replyingTo?.id,
-        }),
-      });
+      const messages = agentMediaType === 'text'
+        ? [{ type: 'text' as const, text: agentText }]
+        : [
+            ...pendingMediaUploads.map((item) => ({
+              type: item.type,
+              mediaId: item.mediaId,
+              mediaMimeType: item.mediaMimeType,
+              filename: item.filename,
+            })),
+            ...externalUrls.map((mediaUrl) => ({ type: agentMediaType, mediaUrl })),
+          ];
 
-      const data = await res.json();
-      if (res.ok) {
-        setSelectedSession(data.session);
+      let latestSession = selectedSession;
+      for (let index = 0; index < messages.length; index += 1) {
+        const message = messages[index];
+        const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}/send-agent-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...message,
+            caption: agentMediaType === 'text' ? undefined : agentCaption,
+            pauseBot: true,
+            accountId: selectedSession.accountId,
+            replyToMessageId: index === 0 ? replyingTo?.id : undefined,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.diagnosticTip || `Erro ao enviar o item ${index + 1}.`);
+        latestSession = data.session;
+      }
+
+      if (latestSession) {
+        setSelectedSession(latestSession);
         setAgentText('');
-        if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
-        setAgentMediaId('');
+        pendingMediaUploads.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+        setPendingMediaUploads([]);
         setAgentMediaUrl('');
-        setAgentMediaMimeType('');
         setAgentCaption('');
-        setAgentFilename('');
         setAgentMediaType('text');
         setReplyingTo(null);
         fetchSessions(true);
-      } else {
-        setSendError(data.error || data.diagnosticTip || 'Erro ao enviar mensagem.');
       }
     } catch (err: any) {
       setSendError(err.message || 'Erro de conexão.');
@@ -259,10 +308,11 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
 
   // Upload outgoing files directly to Meta. Nothing is persisted in R2/local storage.
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 100 * 1024 * 1024) {
-      setSendError('O arquivo excede o limite máximo de 100 MB.');
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const oversized = files.find((file) => file.size > 100 * 1024 * 1024);
+    if (oversized) {
+      setSendError(`O arquivo ${oversized.name} excede o limite máximo de 100 MB.`);
       e.target.value = '';
       return;
     }
@@ -271,28 +321,31 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
     setSendError(null);
 
     try {
-      const res = await fetch(`/api/meta/media?accountId=${encodeURIComponent(activeAccountId || '')}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'X-File-Name': encodeURIComponent(file.name),
-          'X-File-Type': file.type || 'application/octet-stream',
-        },
-        body: file,
-      });
-      const raw = await res.text();
-      let data: any = {};
-      try { data = JSON.parse(raw); } catch { data = { error: raw }; }
-      if (!res.ok || !data.mediaId) {
-        setSendError(data.error || 'A Meta recusou o upload do arquivo.');
-        return;
+      const uploaded: PendingMediaUpload[] = [];
+      for (const file of files) {
+        const res = await fetch(`/api/meta/media?accountId=${encodeURIComponent(activeAccountId || '')}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-File-Name': encodeURIComponent(file.name),
+            'X-File-Type': file.type || 'application/octet-stream',
+          },
+          body: file,
+        });
+        const raw = await res.text();
+        let data: any = {};
+        try { data = JSON.parse(raw); } catch { data = { error: raw }; }
+        if (!res.ok || !data.mediaId) throw new Error(data.error || `A Meta recusou o upload de ${file.name}.`);
+        uploaded.push({
+          key: `${data.mediaId}_${file.name}`,
+          type: file.type.startsWith('image/') ? 'image' : 'document',
+          mediaId: data.mediaId,
+          mediaMimeType: data.mimeType || file.type,
+          filename: data.filename || file.name,
+          previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+        });
       }
-      if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
-      setAgentMediaId(data.mediaId);
-      setAgentMediaMimeType(data.mimeType || file.type);
-      setAgentMediaUrl(URL.createObjectURL(file));
-      setAgentFilename(data.filename || file.name);
-      setAgentMediaType(file.type.startsWith('image/') ? 'image' : 'document');
+      setPendingMediaUploads((current) => [...current, ...uploaded]);
     } catch (err: any) {
       setSendError(err.message || 'Falha no upload direto para a Meta.');
     } finally {
@@ -840,7 +893,10 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                           <span>
                             {isUser ? 'Cliente' : isAgent ? 'Atendente Humano' : 'Robô FluxoZap'}
                           </span>
-                          <span>{formatConversationTime(msg.timestamp)}</span>
+                          <span className="flex items-center gap-1">
+                            {formatConversationTime(msg.timestamp)}
+                            {!isUser && <MessageDeliveryStatus status={msg.status} />}
+                          </span>
                         </div>
 
                         {msg.replyTo && (
@@ -943,6 +999,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
             {/* Hidden file input for uploading from computer */}
             <input
               type="file"
+              multiple
               ref={fileInputRef}
               onChange={handleFileUpload}
               className="hidden"
@@ -1042,7 +1099,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                     {/* Direct computer upload button */}
                     <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-lg border border-slate-200">
                       <span className="text-[11px] text-slate-600 font-medium">
-                        Selecione um arquivo local do seu computador:
+                        Selecione um ou vários arquivos do seu computador:
                       </span>
                       <button
                         type="button"
@@ -1051,36 +1108,44 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                         className="px-3 py-1 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-semibold rounded-md text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
                       >
                         <Upload className="w-3 h-3" />
-                        <span>{isUploadingFile ? 'Enviando...' : 'Escolher Arquivo do PC'}</span>
+                        <span>{isUploadingFile ? 'Preparando arquivos...' : 'Escolher arquivos do PC'}</span>
                       </button>
                     </div>
 
-                    {/* Media preview if uploaded directly to Meta */}
-                    {agentMediaUrl && agentMediaType === 'image' && (
-                      <div className="p-2 bg-white rounded-lg border border-slate-200 flex items-center gap-3">
-                        <img src={agentMediaUrl} alt="Preview" className="w-12 h-12 object-cover rounded-md border" />
-                        <div className="flex-1 overflow-hidden">
-                          <p className="font-semibold text-slate-800 truncate">{agentFilename || 'imagem_selecionada.jpg'}</p>
-                          <p className="text-[10px] text-emerald-600 font-medium">Arquivo enviado diretamente à Meta · não salvo no R2</p>
-                        </div>
+                    {pendingMediaUploads.length > 0 && (
+                      <div className="space-y-1.5">
+                        {pendingMediaUploads.map((item) => (
+                          <div key={item.key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
+                            {item.previewUrl ? <img src={item.previewUrl} alt="Preview" className="h-10 w-10 rounded-md border object-cover" /> : <FileText className="h-5 w-5 shrink-0 text-amber-600" />}
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-semibold text-slate-800">{item.filename}</p>
+                              <p className="text-[10px] font-medium text-emerald-600">Preparado na Meta</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setPendingMediaUploads((current) => current.filter((candidate) => {
+                                if (candidate.key === item.key && candidate.previewUrl) URL.revokeObjectURL(candidate.previewUrl);
+                                return candidate.key !== item.key;
+                              }))}
+                              className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              title="Remover arquivo"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     )}
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-0.5">
-                        URL externa da {agentMediaType === 'image' ? 'Imagem' : 'Documento'} (Opcional)
+                        URLs externas — uma por linha (opcional)
                       </label>
-                      <input
-                        type="text"
-                        value={agentMediaId ? '' : agentMediaUrl}
-                        onChange={(e) => {
-                          if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
-                          setAgentMediaId('');
-                          setAgentMediaMimeType('');
-                          setAgentMediaUrl(e.target.value);
-                        }}
-                        disabled={Boolean(agentMediaId)}
-                        placeholder={agentMediaId ? 'Arquivo local já preparado na Meta' : 'https://exemplo.com/arquivo.jpg'}
+                      <textarea
+                        rows={3}
+                        value={agentMediaUrl}
+                        onChange={(e) => setAgentMediaUrl(e.target.value)}
+                        placeholder={'https://exemplo.com/arquivo-1.pdf\nhttps://exemplo.com/arquivo-2.pdf'}
                         className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
                       />
                       <p className="text-[10px] text-slate-500 mt-1">
@@ -1102,10 +1167,9 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                         type="button"
                         onClick={() => {
                           setAgentMediaType('text');
-                          if (agentMediaUrl.startsWith('blob:')) URL.revokeObjectURL(agentMediaUrl);
-                          setAgentMediaId('');
+                          pendingMediaUploads.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+                          setPendingMediaUploads([]);
                           setAgentMediaUrl('');
-                          setAgentMediaMimeType('');
                           setAgentCaption('');
                         }}
                         className="px-3 py-1 text-slate-600 hover:bg-slate-200 rounded cursor-pointer"
@@ -1114,11 +1178,11 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({ accounts =
                       </button>
                       <button
                         type="submit"
-                        disabled={isSendingAgent || (!agentMediaId && !agentMediaUrl.trim())}
+                        disabled={isSendingAgent || isUploadingFile || (pendingMediaUploads.length === 0 && !agentMediaUrl.trim())}
                         className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs"
                       >
                         {isSendingAgent ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                        <span>Enviar Mídia no WhatsApp</span>
+                        <span>Enviar {pendingMediaUploads.length + agentMediaUrl.split(/\r?\n/).filter((url) => url.trim()).length || ''} mídia(s)</span>
                       </button>
                     </div>
                   </div>

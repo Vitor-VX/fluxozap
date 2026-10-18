@@ -31,6 +31,7 @@ const XPAG_CONFIG_FILE = path.join(DATA_DIR, 'xpag_config.json');
 const XPAG_PAYMENTS_FILE = path.join(DATA_DIR, 'xpag_payments.json');
 const META_CAPI_CONFIG_FILE = path.join(DATA_DIR, 'meta_capi_config.json');
 const SESSION_RETENTION_DAYS = 17;
+const API_LOG_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const CHAT_TIME_ZONE = 'America/Sao_Paulo';
 const META_GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v26.0';
 
@@ -94,6 +95,13 @@ if (fs.existsSync(LOGS_FILE)) {
   }
 }
 
+function isRecentApiLog(log: ApiLogEntry, now = Date.now()): boolean {
+  const timestamp = new Date(log.timestamp).getTime();
+  return Number.isFinite(timestamp) && timestamp >= now - API_LOG_RETENTION_MS;
+}
+
+apiLogs = apiLogs.filter((log) => isRecentApiLog(log)).slice(0, 200);
+
 function saveLogsToFile() {
   try {
     fs.writeFileSync(LOGS_FILE, JSON.stringify(apiLogs.slice(0, 200), null, 2));
@@ -109,6 +117,7 @@ function addApiLog(entry: Omit<ApiLogEntry, 'id' | 'timestamp'>): ApiLogEntry {
     ...entry,
   };
   apiLogs.unshift(fullEntry);
+  apiLogs = apiLogs.filter((log) => isRecentApiLog(log));
   if (apiLogs.length > 200) {
     apiLogs = apiLogs.slice(0, 200);
   }
@@ -122,6 +131,21 @@ function addApiLog(entry: Omit<ApiLogEntry, 'id' | 'timestamp'>): ApiLogEntry {
 
   return fullEntry;
 }
+
+async function cleanupExpiredApiLogs(): Promise<void> {
+  const retained = apiLogs.filter((log) => isRecentApiLog(log)).slice(0, 200);
+  if (retained.length !== apiLogs.length) {
+    apiLogs = retained;
+    saveLogsToFile();
+  }
+  if (mongoService.isConnected()) {
+    await mongoService.deleteLogsOlderThan(new Date(Date.now() - API_LOG_RETENTION_MS).toISOString());
+  }
+}
+
+setInterval(() => {
+  cleanupExpiredApiLogs().catch((err) => console.error('Erro ao limpar logs expirados:', err));
+}, 60 * 60 * 1000);
 
 // Diagnostic helper: analyzes Meta WhatsApp Cloud API errors and gives human-readable fix tips in Portuguese
 function analyzeMetaError(status: number, data: any, recipient?: string): {
@@ -1866,7 +1890,7 @@ async function runFlowStep(
     // Handle node action
     if (currentNode.type === 'send_text') {
       const parsedText = replaceVariables(currentNode.data.text || '', session.variables);
-      const msgItem = {
+      const msgItem: any = {
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         sender: 'bot' as const,
         type: 'text' as const,
@@ -1882,6 +1906,8 @@ async function runFlowStep(
           { text: parsedText },
           accountCreds
         );
+        msgItem.status = sendResult.success ? 'sent' : 'failed';
+        if (sendResult.data?.messages?.[0]?.id) msgItem.id = sendResult.data.messages[0].id;
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar mensagem de texto.');
@@ -1891,7 +1917,7 @@ async function runFlowStep(
     } else if (currentNode.type === 'send_image') {
       const parsedCaption = replaceVariables(currentNode.data.caption || '', session.variables);
       const parsedMediaUrl = replaceVariables(currentNode.data.mediaUrl || '', session.variables);
-      const msgItem = {
+      const msgItem: any = {
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         sender: 'bot' as const,
         type: 'image' as const,
@@ -1914,6 +1940,8 @@ async function runFlowStep(
           },
           accountCreds
         );
+        msgItem.status = sendResult.success ? 'sent' : 'failed';
+        if (sendResult.data?.messages?.[0]?.id) msgItem.id = sendResult.data.messages[0].id;
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar imagem.');
@@ -1922,7 +1950,7 @@ async function runFlowStep(
       }
     } else if (currentNode.type === 'send_audio') {
       const parsedMediaUrl = replaceVariables(currentNode.data.mediaUrl || '', session.variables);
-      const msgItem = {
+      const msgItem: any = {
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         sender: 'bot' as const,
         type: 'audio' as const,
@@ -1946,6 +1974,8 @@ async function runFlowStep(
           },
           accountCreds
         );
+        msgItem.status = sendResult.success ? 'sent' : 'failed';
+        if (sendResult.data?.messages?.[0]?.id) msgItem.id = sendResult.data.messages[0].id;
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar áudio.');
@@ -1955,7 +1985,7 @@ async function runFlowStep(
     } else if (currentNode.type === 'send_video') {
       const parsedCaption = replaceVariables(currentNode.data.caption || '', session.variables);
       const parsedMediaUrl = replaceVariables(currentNode.data.mediaUrl || '', session.variables);
-      const msgItem = {
+      const msgItem: any = {
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         sender: 'bot' as const,
         type: 'video' as const,
@@ -1979,6 +2009,8 @@ async function runFlowStep(
           },
           accountCreds
         );
+        msgItem.status = sendResult.success ? 'sent' : 'failed';
+        if (sendResult.data?.messages?.[0]?.id) msgItem.id = sendResult.data.messages[0].id;
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar vídeo.');
@@ -1988,7 +2020,7 @@ async function runFlowStep(
     } else if (currentNode.type === 'send_document') {
       const parsedCaption = replaceVariables(currentNode.data.caption || '', session.variables);
       const parsedMediaUrl = replaceVariables(currentNode.data.mediaUrl || '', session.variables);
-      const msgItem = {
+      const msgItem: any = {
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         sender: 'bot' as const,
         type: 'document' as const,
@@ -2012,6 +2044,8 @@ async function runFlowStep(
           },
           accountCreds
         );
+        msgItem.status = sendResult.success ? 'sent' : 'failed';
+        if (sendResult.data?.messages?.[0]?.id) msgItem.id = sendResult.data.messages[0].id;
         if (sendResult.logEntry) lastLog = sendResult.logEntry;
         if (!sendResult.success) {
           executionErrors.push(sendResult.error || 'Erro ao enviar documento.');
@@ -2572,6 +2606,7 @@ async function startServer() {
   // hydrated only from MongoDB and are never restored from local JSON.
   if (mongoService.isConnected()) {
     try {
+      await cleanupExpiredApiLogs();
       const doc = await mongoService.getProjectSnapshot();
       if (doc) {
         const databaseFlows = doc.flows || [];
@@ -2597,7 +2632,7 @@ async function startServer() {
           }
         }
         if (doc.logs && doc.logs.length > 0) {
-          apiLogs = doc.logs as any;
+          apiLogs = (doc.logs as ApiLogEntry[]).filter((log) => isRecentApiLog(log)).slice(0, 200);
         }
         if (doc.r2Config?.accountId) {
           r2StorageService.updateConfig(doc.r2Config as any);
@@ -3199,6 +3234,7 @@ async function startServer() {
         logs: apiLogs,
         xpagPayments: Array.from(xpagPayments.values()),
       });
+      await cleanupExpiredApiLogs();
     }
     res.json(result);
   });
@@ -4239,13 +4275,17 @@ async function startServer() {
                   const session = sessions.get(sessionStorageKey(statusAccount.id, statusEvent.recipient_id));
                   const historyItem = session?.history.find((item) => item.id === statusEvent.id);
                   if (session && historyItem) {
-                    historyItem.status = statusEvent.status === 'failed'
+                    const nextStatus = statusEvent.status === 'failed'
                       ? 'failed'
                       : statusEvent.status === 'read'
                         ? 'read'
                         : statusEvent.status === 'delivered'
                           ? 'delivered'
                           : 'sent';
+                    const statusRank: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
+                    if ((statusRank[nextStatus] || 0) >= (statusRank[historyItem.status || ''] || 0)) {
+                      historyItem.status = nextStatus;
+                    }
                     session.updatedAt = new Date().toISOString();
                     persistSession(session);
                   }
@@ -4541,7 +4581,7 @@ async function startServer() {
         filename,
         caption,
         timestamp: formatBrasiliaTime(),
-        status: sendResult.success ? 'delivered' : 'failed',
+        status: sendResult.success ? 'sent' : 'failed',
         replyTo: replyToMessageId ? (() => {
           const original = session.history.find((item) => item.id === replyToMessageId);
           return original ? { messageId: original.id, sender: original.sender, content: original.content, type: original.type } : undefined;

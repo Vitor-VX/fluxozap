@@ -334,6 +334,12 @@ class MongoService {
     return true;
   }
 
+  public async deleteLogsOlderThan(cutoffIso: string): Promise<number> {
+    if (!this.isConnected()) return 0;
+    const result = await ApiLogModel.deleteMany({ timestamp: { $lt: cutoffIso } });
+    return result.deletedCount || 0;
+  }
+
   public async clearLogs(): Promise<boolean> {
     if (!this.isConnected()) return false;
     await ApiLogModel.deleteMany({});

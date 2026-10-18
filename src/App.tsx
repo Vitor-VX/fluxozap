@@ -30,6 +30,10 @@ import { WhatsAppAccount } from './types/flow';
 import { DollarSign } from 'lucide-react';
 
 type ActiveTab = 'editor' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag' | 'capi' | 'ads';
+export interface ConversationTarget {
+  accountId: string;
+  phoneNumber: string;
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
@@ -52,6 +56,13 @@ export default function App() {
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [activeAccountId, setActiveAccountId] = useState<string>('');
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [conversationTarget, setConversationTarget] = useState<ConversationTarget | null>(null);
+
+  const openConversation = (target: ConversationTarget) => {
+    setConversationTarget(target);
+    setActiveAccountId(target.accountId);
+    setActiveTab('conversations');
+  };
 
   const fetchAccounts = async () => {
     try {
@@ -332,7 +343,12 @@ export default function App() {
           />
         )}
         {activeTab === 'conversations' && (
-          <ConversationsList accounts={accounts} activeAccountId={activeAccountId} />
+          <ConversationsList
+            accounts={accounts}
+            activeAccountId={activeAccountId}
+            openConversationTarget={conversationTarget}
+            onConversationTargetHandled={() => setConversationTarget(null)}
+          />
         )}
         {activeTab === 'costs' && (
           <ApiSpendTracker accounts={accounts} activeAccountId={activeAccountId} />
@@ -344,7 +360,7 @@ export default function App() {
         {activeTab === 'r2' && <R2StorageSettings />}
         {activeTab === 'xpag' && <XPagSettings />}
         {activeTab === 'capi' && <MetaConversionsSettings accountId={activeAccountId} accountName={activeAccount?.name} />}
-        {activeTab === 'ads' && <FacebookAdsDashboard accountId={activeAccountId} accountName={activeAccount?.name} onOpenSettings={() => setActiveTab('capi')} />}
+        {activeTab === 'ads' && <FacebookAdsDashboard accountId={activeAccountId} accountName={activeAccount?.name} onOpenSettings={() => setActiveTab('capi')} onOpenConversation={openConversation} />}
         {activeTab === 'settings' && (
           <MetaApiSettings
             onOpenLogs={() => setActiveTab('logs')}
