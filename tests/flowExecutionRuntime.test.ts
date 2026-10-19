@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildPaymentBranchTargets,
+  canStartFlowFromInboundMessage,
   DURABLE_EXECUTION_CHECKPOINT_VERSION,
   FlowExecutionCoordinator,
   resolvePaymentBranchTarget,
@@ -111,6 +112,21 @@ test('checkpoint novo não reinicia enquanto estiver aguardando cliente ou prazo
   };
   assert.equal(shouldRestoreExecutionCheckpoint({ ...checkpoint, waitingForInput: true }), false);
   assert.equal(shouldRestoreExecutionCheckpoint({ ...checkpoint, waitingUntil: '2026-10-19T12:00:00.000Z' }), false);
+});
+
+test('segunda resposta durante delay entre blocos não reinicia o funil', () => {
+  assert.equal(canStartFlowFromInboundMessage({
+    currentNodeId: 'next-message',
+    waitingUntil: '2026-10-19T20:30:00.000Z',
+    waitingKind: 'node_delay',
+    flowCompleted: false,
+  }), false);
+});
+
+test('mensagem só pode iniciar quando a sessão realmente não possui execução', () => {
+  assert.equal(canStartFlowFromInboundMessage({ currentNodeId: null, flowCompleted: false }), true);
+  assert.equal(canStartFlowFromInboundMessage({ currentNodeId: 'in-progress', flowCompleted: false }), false);
+  assert.equal(canStartFlowFromInboundMessage({ currentNodeId: null, flowCompleted: true }), false);
 });
 
 test('o coordenador impede duas execuções simultâneas para o mesmo contato', async () => {

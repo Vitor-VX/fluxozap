@@ -12,6 +12,7 @@ import { normalizeAccountName } from './src/services/accountValidation';
 import { mergeLegacyAndMongoSessions } from './src/services/legacySessionMigration';
 import {
   buildPaymentBranchTargets,
+  canStartFlowFromInboundMessage,
   DURABLE_EXECUTION_CHECKPOINT_VERSION,
   FlowExecutionCoordinator,
   resolvePaymentBranchTarget,
@@ -2593,6 +2594,15 @@ async function handleIncomingUserMessage(
         return { executionErrors: [] };
       }
     }
+  }
+
+  // A second customer message may arrive while the funnel is between blocks
+  // in a durable delay. It must be recorded, but it must never fall through to
+  // the start trigger and open the funnel again.
+  if (!canStartFlowFromInboundMessage(session)) {
+    session.updatedAt = new Date().toISOString();
+    await persistSession(session);
+    return { executionErrors: [] };
   }
 
   // 2. If the flow has not started yet, check its start trigger rule.

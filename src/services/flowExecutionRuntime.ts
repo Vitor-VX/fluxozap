@@ -34,6 +34,24 @@ export interface RestorableExecutionState {
   currentNodeId?: string | null;
 }
 
+export interface InboundFlowState {
+  currentNodeId?: string | null;
+  flowCompleted?: boolean;
+  waitingForInput?: boolean;
+  waitingForPayment?: boolean;
+  waitingUntil?: string;
+  waitingKind?: string;
+}
+
+export function canStartFlowFromInboundMessage(state: InboundFlowState): boolean {
+  return !state.flowCompleted &&
+    !state.waitingForInput &&
+    !state.waitingForPayment &&
+    !state.waitingUntil &&
+    !state.waitingKind &&
+    !state.currentNodeId;
+}
+
 export function shouldRestoreExecutionCheckpoint(state: RestorableExecutionState): boolean {
   return state.phoneNumber !== 'simulator_user' &&
     !state.botPaused &&
