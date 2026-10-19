@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildPaymentBranchTargets,
+  DURABLE_EXECUTION_CHECKPOINT_VERSION,
   FlowExecutionCoordinator,
   resolvePaymentBranchTarget,
+  shouldRestoreExecutionCheckpoint,
   transitionPaymentBranch,
   type PaymentRouteState,
 } from '../src/services/flowExecutionRuntime';
@@ -88,6 +90,27 @@ test('expiração com saída conectada interrompe a espera e segue o caminho con
   assert.equal(nextState.flowCompleted, false);
   assert.equal(nextState.waitingForInput, false);
   assert.equal(nextState.waitingUntil, undefined);
+});
+
+test('não restaura automaticamente checkpoints da versão antiga após o deploy', () => {
+  const legacy = {
+    phoneNumber: '5511', currentNodeId: 'message-node', flowCompleted: false,
+    waitingForInput: false, executionCheckpointVersion: 1,
+  };
+  assert.equal(shouldRestoreExecutionCheckpoint(legacy), false);
+  assert.equal(shouldRestoreExecutionCheckpoint({
+    ...legacy,
+    executionCheckpointVersion: DURABLE_EXECUTION_CHECKPOINT_VERSION,
+  }), true);
+});
+
+test('checkpoint novo não reinicia enquanto estiver aguardando cliente ou prazo', () => {
+  const checkpoint = {
+    phoneNumber: '5511', currentNodeId: 'message-node', flowCompleted: false,
+    executionCheckpointVersion: DURABLE_EXECUTION_CHECKPOINT_VERSION,
+  };
+  assert.equal(shouldRestoreExecutionCheckpoint({ ...checkpoint, waitingForInput: true }), false);
+  assert.equal(shouldRestoreExecutionCheckpoint({ ...checkpoint, waitingUntil: '2026-10-19T12:00:00.000Z' }), false);
 });
 
 test('o coordenador impede duas execuções simultâneas para o mesmo contato', async () => {

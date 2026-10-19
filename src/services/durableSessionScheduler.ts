@@ -2,6 +2,7 @@ import type { Collection, Document, Filter, UpdateFilter } from 'mongodb';
 
 export const SESSION_WAITING_STATUS = 'waiting';
 export const RELEASED_SESSION_LEASE = new Date(0);
+export const DURABLE_SCHEDULER_VERSION = 2;
 
 export interface DurableSessionState {
   accountId?: string;
@@ -11,12 +12,19 @@ export interface DurableSessionState {
   waitingNodeId?: string;
   waitingNextNodeId?: string;
   botPaused?: boolean;
+  executionCheckpointVersion?: number;
 }
 
 export function buildDurableSessionPersistenceUpdate(
   data: DurableSessionState
 ): UpdateFilter<Document> {
-  const isWaiting = Boolean(!data.botPaused && data.waitingUntil && data.waitingKind && data.waitingNodeId);
+  const isWaiting = Boolean(
+    !data.botPaused &&
+    data.executionCheckpointVersion === DURABLE_SCHEDULER_VERSION &&
+    data.waitingUntil &&
+    data.waitingKind &&
+    data.waitingNodeId
+  );
   const $set: Document = {
     accountId: data.accountId,
     phoneNumber: data.phoneNumber,
@@ -25,6 +33,7 @@ export function buildDurableSessionPersistenceUpdate(
 
   if (isWaiting) {
     $set.schedulerStatus = SESSION_WAITING_STATUS;
+    $set.schedulerVersion = DURABLE_SCHEDULER_VERSION;
     $set.waitingUntil = new Date(data.waitingUntil!);
     $set.waitingKind = data.waitingKind;
     $set.waitingNodeId = data.waitingNodeId;
@@ -35,7 +44,7 @@ export function buildDurableSessionPersistenceUpdate(
   const update: UpdateFilter<Document> = { $set };
   if (!isWaiting) {
     update.$unset = {
-      schedulerStatus: '', waitingUntil: '', waitingKind: '', waitingNodeId: '',
+      schedulerStatus: '', schedulerVersion: '', waitingUntil: '', waitingKind: '', waitingNodeId: '',
       waitingNextNodeId: '', leaseOwner: '', leaseUntil: '', resumeAttempts: '',
     };
   }
@@ -51,6 +60,7 @@ export async function claimDueSessionBatch(
 ): Promise<Document[]> {
   const availableFilter: Filter<Document> = {
     schedulerStatus: SESSION_WAITING_STATUS,
+    schedulerVersion: DURABLE_SCHEDULER_VERSION,
     waitingUntil: { $lte: now },
     leaseUntil: { $lte: now },
   };

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { MongoClient, type Collection } from 'mongodb';
 import { buildDurableSessionPersistenceUpdate } from '../../src/services/durableSessionScheduler';
+import { DURABLE_SCHEDULER_VERSION } from '../../src/services/durableSessionScheduler';
 import { mergeLegacyAndMongoSessions, type MigratableSession } from '../../src/services/legacySessionMigration';
 
 const SOURCE_DATABASE = 'FluxoZap';
@@ -75,7 +76,7 @@ test('ensaia a migração das sessões atuais sem alterar o banco FluxoZap', asy
     const collection = client.db(databaseName).collection('sessions');
     await collection.createIndex({ accountId: 1, phoneNumber: 1 }, { unique: true });
     await collection.createIndex(
-      { schedulerStatus: 1, waitingUntil: 1, leaseUntil: 1 },
+      { schedulerStatus: 1, schedulerVersion: 1, waitingUntil: 1, leaseUntil: 1 },
       { partialFilterExpression: { schedulerStatus: 'waiting' } }
     );
     await bulkPersist(collection, merged.sessions);
@@ -102,6 +103,7 @@ test('ensaia a migração das sessões atuais sem alterar o banco FluxoZap', asy
       }
       const shouldBeIndexed = Boolean(
         !restored.botPaused && restored.waitingUntil && restored.waitingKind && restored.waitingNodeId
+        && restored.executionCheckpointVersion === DURABLE_SCHEDULER_VERSION
       );
       assert.equal(document.schedulerStatus === 'waiting', shouldBeIndexed);
       if (shouldBeIndexed) indexedWaits += 1;
@@ -119,6 +121,7 @@ test('ensaia a migração das sessões atuais sem alterar o banco FluxoZap', asy
 
     const indexExplain = await restoredCollection.find({
       schedulerStatus: 'waiting',
+      schedulerVersion: DURABLE_SCHEDULER_VERSION,
       waitingUntil: { $lte: new Date('2999-01-01T00:00:00.000Z') },
       leaseUntil: { $lte: new Date('2999-01-01T00:00:00.000Z') },
     }).limit(1).explain('executionStats');

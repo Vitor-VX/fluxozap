@@ -12,8 +12,10 @@ import { normalizeAccountName } from './src/services/accountValidation';
 import { mergeLegacyAndMongoSessions } from './src/services/legacySessionMigration';
 import {
   buildPaymentBranchTargets,
+  DURABLE_EXECUTION_CHECKPOINT_VERSION,
   FlowExecutionCoordinator,
   resolvePaymentBranchTarget,
+  shouldRestoreExecutionCheckpoint,
   transitionPaymentBranch,
   type PaymentFlowBranch,
 } from './src/services/flowExecutionRuntime';
@@ -1068,7 +1070,7 @@ async function scheduleNextNodeDelay(
   session.waitingIsLiveWhatsApp = isLiveWhatsApp;
   session.currentNodeId = nextNodeId;
   session.flowCompleted = false;
-  session.executionCheckpointVersion = 1;
+  session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
   session.updatedAt = new Date().toISOString();
   session.history.push({
     id: `node_delay_${Date.now()}`,
@@ -1110,7 +1112,7 @@ async function scheduleDurableWait(
   session.waitingNodeId = node.id;
   session.waitingKind = kind;
   session.waitingIsLiveWhatsApp = isLiveWhatsApp;
-  session.executionCheckpointVersion = 1;
+  session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
   session.updatedAt = new Date().toISOString();
   await persistSession(session);
 }
@@ -2126,7 +2128,7 @@ async function executeFlowSteps(
             return { executionErrors, lastLog };
           }
           session.currentNodeId = simulationEdge.target;
-          session.executionCheckpointVersion = 1;
+          session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
           await persistSession(session);
           continue;
         }
@@ -2145,7 +2147,7 @@ async function executeFlowSteps(
               return { executionErrors, lastLog };
             }
             session.currentNodeId = nextEdge.target;
-            session.executionCheckpointVersion = 1;
+            session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
             await persistSession(session);
             continue;
           }
@@ -2176,7 +2178,7 @@ async function executeFlowSteps(
               return { executionErrors, lastLog };
             }
             session.currentNodeId = errorEdge.target;
-            session.executionCheckpointVersion = 1;
+            session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
             await persistSession(session);
             continue;
           }
@@ -2187,7 +2189,7 @@ async function executeFlowSteps(
     } else if (currentNode.type === 'wait_reply') {
       session.waitingForInput = true;
       session.waitingVariableName = currentNode.data.variableName?.trim() || undefined;
-      session.executionCheckpointVersion = 1;
+      session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
       clearDurableWait(session);
       if (currentNode.data.waitReplyTimeoutEnabled) {
         await scheduleDurableWait(session, currentNode, 'reply_timeout', isLiveWhatsApp);
@@ -2220,7 +2222,7 @@ async function executeFlowSteps(
       session.waitingPaymentNodeId = undefined;
       clearDurableWait(session);
       session.flowCompleted = true;
-      session.executionCheckpointVersion = 1;
+      session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
       session.history.push({
         id: `flow_completed_${Date.now()}`,
         sender: 'system',
@@ -2238,7 +2240,7 @@ async function executeFlowSteps(
         return { executionErrors, lastLog };
       }
       session.currentNodeId = outgoingEdge.target;
-      session.executionCheckpointVersion = 1;
+      session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
       session.updatedAt = new Date().toISOString();
       await persistSession(session);
     } else {
@@ -2343,7 +2345,7 @@ async function releaseLegacyGeneratedPaymentWait(session: SessionData): Promise<
   session.waitingPaymentNodeId = undefined;
   if (!session.currentNodeId) session.currentNodeId = generatedEdge.target;
   session.flowCompleted = false;
-  session.executionCheckpointVersion = 1;
+  session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
   session.updatedAt = new Date().toISOString();
   await persistSession(session);
   return true;
@@ -2354,16 +2356,7 @@ async function restorePersistedExecutions(): Promise<void> {
   await processDurableWaits();
   for (const session of sessions.values()) {
     await releaseLegacyGeneratedPaymentWait(session);
-    if (
-      session.phoneNumber === 'simulator_user' ||
-      session.botPaused ||
-      session.flowCompleted ||
-      session.waitingForInput ||
-      session.waitingForPayment ||
-      session.waitingUntil ||
-      session.executionCheckpointVersion !== 1 ||
-      !session.currentNodeId
-    ) continue;
+    if (!shouldRestoreExecutionCheckpoint(session)) continue;
     const storageKey = sessionStorageKey(session.accountId, session.phoneNumber);
     if (durableResumeLocks.has(storageKey)) continue;
     durableResumeLocks.add(storageKey);
@@ -2628,7 +2621,7 @@ async function handleIncomingUserMessage(
   session.currentNodeId = null;
   session.waitingForInput = false;
   clearDurableWait(session);
-  session.executionCheckpointVersion = 1;
+  session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
   session.flowCompleted = false;
   return await runFlowStep(session, isLiveWhatsApp);
 }
@@ -4582,7 +4575,7 @@ async function startServer() {
     session.waitingPaymentExternalId = undefined;
     session.waitingPaymentNodeId = undefined;
     clearDurableWait(session);
-    session.executionCheckpointVersion = 1;
+    session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
 
     try {
       const { executionErrors, lastLog } = await runFlowStep(session, true);
@@ -4707,7 +4700,7 @@ async function startServer() {
     session.waitingPaymentExternalId = undefined;
     session.waitingPaymentNodeId = undefined;
     clearDurableWait(session);
-    session.executionCheckpointVersion = 1;
+    session.executionCheckpointVersion = DURABLE_EXECUTION_CHECKPOINT_VERSION;
     session.flowCompleted = false;
     session.botPaused = false;
     session.updatedAt = new Date().toISOString();

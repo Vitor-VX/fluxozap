@@ -5,6 +5,7 @@ import { calculateObjectSize } from 'bson';
 import { MongoClient, type Collection, type Document } from 'mongodb';
 import {
   claimDueSessionBatch,
+  DURABLE_SCHEDULER_VERSION,
   RELEASED_SESSION_LEASE,
   SESSION_WAITING_STATUS,
 } from '../../src/services/durableSessionScheduler';
@@ -20,6 +21,7 @@ function readMongoUri(): string {
 function waitingFields(dueAt: Date) {
   return {
     schedulerStatus: SESSION_WAITING_STATUS,
+    schedulerVersion: DURABLE_SCHEDULER_VERSION,
     waitingUntil: dueAt,
     waitingKind: 'reply_timeout',
     waitingNodeId: 'wait-node',
@@ -37,6 +39,7 @@ async function claimDueSession(
   return collection.findOneAndUpdate(
     {
       schedulerStatus: SESSION_WAITING_STATUS,
+      schedulerVersion: DURABLE_SCHEDULER_VERSION,
       waitingUntil: { $lte: now },
       leaseUntil: { $lte: now },
     },
@@ -99,7 +102,7 @@ test('Mongo restaura, disputa e recicla esperas sem criar um job permanente por 
     let collection = client.db(databaseName).collection('sessions');
     await collection.createIndex({ accountId: 1, phoneNumber: 1 }, { unique: true });
     await collection.createIndex(
-      { schedulerStatus: 1, waitingUntil: 1, leaseUntil: 1 },
+      { schedulerStatus: 1, schedulerVersion: 1, waitingUntil: 1, leaseUntil: 1 },
       { partialFilterExpression: { schedulerStatus: SESSION_WAITING_STATUS } }
     );
 
@@ -112,6 +115,7 @@ test('Mongo restaura, disputa e recicla esperas sem criar um job permanente por 
       data: {
         currentNodeId: index < waitingCount ? 'wait-node' : 'active-node',
         waitingForInput: index < waitingCount,
+        executionCheckpointVersion: index < waitingCount ? DURABLE_SCHEDULER_VERSION : undefined,
         variables: { name: `Cliente ${index}`, source: 'restart-test' },
       },
       ...(index < waitingCount ? waitingFields(new Date(now.getTime() - 1_000 + index)) : {}),
@@ -139,6 +143,7 @@ test('Mongo restaura, disputa e recicla esperas sem criar um job permanente por 
       {
         ...raceFilter,
         schedulerStatus: SESSION_WAITING_STATUS,
+        schedulerVersion: DURABLE_SCHEDULER_VERSION,
         waitingUntil: { $lte: now },
         leaseUntil: { $lte: now },
       },
@@ -161,7 +166,7 @@ test('Mongo restaura, disputa e recicla esperas sem criar um job permanente por 
       { _id: reclaimed!._id, leaseOwner: 'worker-after-restart' },
       {
         $unset: {
-          schedulerStatus: '', waitingUntil: '', waitingKind: '', waitingNodeId: '',
+          schedulerStatus: '', schedulerVersion: '', waitingUntil: '', waitingKind: '', waitingNodeId: '',
           waitingNextNodeId: '', leaseOwner: '', leaseUntil: '', resumeAttempts: '',
         },
       }
@@ -187,6 +192,7 @@ test('Mongo restaura, disputa e recicla esperas sem criar um job permanente por 
 
     const explain = await collection.find({
       schedulerStatus: SESSION_WAITING_STATUS,
+      schedulerVersion: DURABLE_SCHEDULER_VERSION,
       waitingUntil: { $lte: new Date(now.getTime() + 60_000) },
       leaseUntil: { $lte: new Date(now.getTime() + 60_000) },
     }).limit(1).explain('executionStats') as Document;

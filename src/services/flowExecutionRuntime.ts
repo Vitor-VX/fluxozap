@@ -1,4 +1,5 @@
 export type PaymentFlowBranch = 'paid' | 'error' | 'expired';
+export const DURABLE_EXECUTION_CHECKPOINT_VERSION = 2;
 
 export interface FlowEdgeLike {
   source: string;
@@ -20,6 +21,28 @@ export interface PaymentRouteState {
   currentNodeId: string | null;
   flowCompleted?: boolean;
   executionCheckpointVersion?: number;
+}
+
+export interface RestorableExecutionState {
+  phoneNumber: string;
+  botPaused?: boolean;
+  flowCompleted?: boolean;
+  waitingForInput?: boolean;
+  waitingForPayment?: boolean;
+  waitingUntil?: string;
+  executionCheckpointVersion?: number;
+  currentNodeId?: string | null;
+}
+
+export function shouldRestoreExecutionCheckpoint(state: RestorableExecutionState): boolean {
+  return state.phoneNumber !== 'simulator_user' &&
+    !state.botPaused &&
+    !state.flowCompleted &&
+    !state.waitingForInput &&
+    !state.waitingForPayment &&
+    !state.waitingUntil &&
+    state.executionCheckpointVersion === DURABLE_EXECUTION_CHECKPOINT_VERSION &&
+    Boolean(state.currentNodeId);
 }
 
 export function buildPaymentBranchTargets(
@@ -73,7 +96,7 @@ export function transitionPaymentBranch<T extends PaymentRouteState>(
       waitingPaymentNodeId: undefined,
       currentNodeId: target || null,
       flowCompleted: !target,
-      executionCheckpointVersion: 1,
+      executionCheckpointVersion: DURABLE_EXECUTION_CHECKPOINT_VERSION,
     },
     routeChanged: true,
   };

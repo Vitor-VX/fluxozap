@@ -28,6 +28,7 @@ const SessionSchema = new Schema(
     accountId: { type: String, required: true },
     data: { type: Schema.Types.Mixed, required: true },
     schedulerStatus: { type: String },
+    schedulerVersion: { type: Number },
     waitingUntil: { type: Date },
     waitingKind: { type: String },
     waitingNodeId: { type: String },
@@ -40,7 +41,7 @@ const SessionSchema = new Schema(
 );
 SessionSchema.index({ accountId: 1, phoneNumber: 1 }, { unique: true });
 SessionSchema.index(
-  { schedulerStatus: 1, waitingUntil: 1, leaseUntil: 1 },
+  { schedulerStatus: 1, schedulerVersion: 1, waitingUntil: 1, leaseUntil: 1 },
   { partialFilterExpression: { schedulerStatus: 'waiting' } }
 );
 
