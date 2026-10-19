@@ -11,6 +11,10 @@ import {
   WhatsAppAccountModel,
   XPagPaymentModel,
 } from '../models/FluxoZap';
+import {
+  buildDurableSessionPersistenceUpdate,
+  claimDueSessionBatch,
+} from './durableSessionScheduler';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,6 +34,7 @@ export interface ProjectSnapshot {
   accounts?: any[];
   logs?: any[];
   xpagPayments?: any[];
+  migrations?: Record<string, string>;
 }
 
 export interface MongoStatus {
@@ -240,7 +245,23 @@ class MongoService {
       accounts: accounts.map((item: any) => item.data),
       logs: logs.map((item: any) => item.data),
       xpagPayments: payments.map((item: any) => item.data),
+      migrations: (project as any)?.migrations || {},
     };
+  }
+
+  public async isMigrationCompleted(name: string): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    const project = await ProjectConfig.findOne({ identifier: 'default' }).select('migrations').lean();
+    return Boolean((project as any)?.migrations?.[name]);
+  }
+
+  public async completeMigration(name: string): Promise<void> {
+    if (!this.isConnected()) throw new Error('MongoDB desconectado durante a migração.');
+    await ProjectConfig.updateOne(
+      { identifier: 'default' },
+      { $set: { [`migrations.${name}`]: new Date().toISOString() } },
+      { upsert: true }
+    );
   }
 
   public async saveFlow(flowData: any): Promise<boolean> {
@@ -290,10 +311,43 @@ class MongoService {
     if (!this.isConnected() || !data?.phoneNumber || !data?.accountId) return false;
     await SessionModel.updateOne(
       { accountId: data.accountId, phoneNumber: data.phoneNumber },
-      { $set: { accountId: data.accountId, data } },
+      buildDurableSessionPersistenceUpdate(data),
       { upsert: true }
     );
     return true;
+  }
+
+  public async saveSessions(sessions: any[], batchSize = 500): Promise<number> {
+    if (!this.isConnected()) throw new Error('MongoDB desconectado ao salvar sessões.');
+    const validSessions = sessions.filter((item) => item?.phoneNumber && item?.accountId);
+    for (let offset = 0; offset < validSessions.length; offset += batchSize) {
+      const batch = validSessions.slice(offset, offset + batchSize);
+      await SessionModel.bulkWrite(batch.map((data) => ({
+        updateOne: {
+          filter: { accountId: data.accountId, phoneNumber: data.phoneNumber },
+          update: buildDurableSessionPersistenceUpdate(data),
+          upsert: true,
+        },
+      })), { ordered: false });
+    }
+    return validSessions.length;
+  }
+
+  public async claimDueSessions(
+    workerId: string,
+    now = new Date(),
+    batchSize = 100,
+    leaseMs = 30_000
+  ): Promise<any[]> {
+    if (!this.isConnected()) return [];
+    const claimed = await claimDueSessionBatch(
+      SessionModel.collection as any,
+      workerId,
+      now,
+      batchSize,
+      leaseMs
+    );
+    return claimed.map((item: any) => item.data).filter(Boolean);
   }
 
   public async deleteSession(accountId: string, phoneNumber: string): Promise<boolean> {

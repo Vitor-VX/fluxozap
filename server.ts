@@ -8,6 +8,15 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { mongoService } from './src/services/mongodb';
 import { r2StorageService } from './src/services/r2Storage';
+import { normalizeAccountName } from './src/services/accountValidation';
+import { mergeLegacyAndMongoSessions } from './src/services/legacySessionMigration';
+import {
+  buildPaymentBranchTargets,
+  FlowExecutionCoordinator,
+  resolvePaymentBranchTarget,
+  transitionPaymentBranch,
+  type PaymentFlowBranch,
+} from './src/services/flowExecutionRuntime';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -489,6 +498,7 @@ interface XPagConfig {
 
 type XPagPaymentMethod = 'PIX' | 'SPEI' | 'OXXO';
 type XPagCurrency = 'BRL' | 'MXN';
+type XPagFlowBranch = PaymentFlowBranch;
 
 interface XPagPaymentRecord {
   externalId: string;
@@ -517,6 +527,9 @@ interface XPagPaymentRecord {
   response: any;
   createdAt: string;
   updatedAt: string;
+  flowOutcomeRoutingEnabled?: boolean;
+  flowBranchTargets?: Partial<Record<XPagFlowBranch, string>>;
+  flowBranchHandledAt?: Partial<Record<XPagFlowBranch, string>>;
   metaConversionSentAt?: string;
   metaConversionEventId?: string;
   metaConversionError?: string;
@@ -677,41 +690,30 @@ interface SessionData {
 }
 
 const sessions: Map<string, SessionData> = new Map();
+const LEGACY_SESSIONS_MIGRATION = 'mongo_only_sessions_v1';
 
 function sessionStorageKey(accountId: string | undefined, phoneNumber: string): string {
   return `${accountId || 'unassigned'}::${phoneNumber}`;
 }
 
-function saveSessionsToFile() {
-  try {
-    const obj = Object.fromEntries(sessions);
-    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2));
-  } catch (err) {
-    console.error('Error saving sessions:', err);
-  }
-}
-
-if (fs.existsSync(SESSIONS_FILE)) {
+function readLegacySessionsForMigration(): SessionData[] {
+  if (!fs.existsSync(SESSIONS_FILE)) return [];
   try {
     const saved = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
-    for (const val of Object.values(saved)) {
-      const session = val as SessionData;
-      session.autoDeleteDays = SESSION_RETENTION_DAYS;
-      session.autoDeleteAt = new Date(new Date(session.updatedAt || session.createdAt).getTime() + SESSION_RETENTION_DAYS * 86400000).toISOString();
-      sessions.set(sessionStorageKey(session.accountId, session.phoneNumber), session);
-    }
+    return Object.values(saved)
+      .filter((item: any) => item?.phoneNumber)
+      .map((item: any) => ({ ...item, accountId: item.accountId || 'unassigned' })) as SessionData[];
   } catch (err) {
-    console.error('Error loading sessions:', err);
+    console.error('[Migração Mongo] Não foi possível ler o backup legado de sessões:', err);
+    throw err;
   }
 }
 
-function persistSession(session: SessionData) {
-  saveSessionsToFile();
-  if (mongoService.isConnected()) {
-    mongoService.saveSession(session).catch((err) => {
-      console.error('[MongoDB Atlas] Error saving session to FluxoZap:', err);
-    });
+async function persistSession(session: SessionData): Promise<void> {
+  if (!mongoService.isConnected()) {
+    throw new Error('MongoDB indisponível: a sessão não pode ser persistida com segurança.');
   }
+  await mongoService.saveSession(structuredClone(session));
 }
 
 function getDefaultSessionVariables(session: Pick<SessionData, 'phoneNumber' | 'name'>): Record<string, string> {
@@ -808,7 +810,6 @@ function getOrCreateSession(phoneNumber: string, accountId?: string): SessionDat
       updatedAt: now.toISOString(),
     };
     sessions.set(storageKey, session);
-    persistSession(session);
   } else {
     if (acc?.flow?.id) session.activeFlowId = acc.flow.id;
     updateWindowState(session);
@@ -818,7 +819,7 @@ function getOrCreateSession(phoneNumber: string, accountId?: string): SessionDat
 }
 
 // Periodic cleanup of expired conversations (17 days rule)
-function cleanupExpiredSessions() {
+async function cleanupExpiredSessions() {
   const now = Date.now();
   let deletedCount = 0;
   for (const [storageKey, s] of sessions.entries()) {
@@ -828,13 +829,12 @@ function cleanupExpiredSessions() {
     if (now - lastActive > days * 24 * 60 * 60 * 1000) {
       sessions.delete(storageKey);
       if (mongoService.isConnected()) {
-        mongoService.deleteSession(s.accountId || 'unassigned', s.phoneNumber).catch(console.error);
+        await mongoService.deleteSession(s.accountId || 'unassigned', s.phoneNumber);
       }
       deletedCount++;
     }
   }
   if (deletedCount > 0) {
-    saveSessionsToFile();
     console.log(`[Auto-Delete Cleanup] ${deletedCount} conversas expiradas foram removidas.`);
   }
 }
@@ -1010,7 +1010,9 @@ async function sendMetaPurchaseConversion(
 }
 
 // Run cleanup check every hour
-setInterval(cleanupExpiredSessions, 60 * 60 * 1000);
+setInterval(() => {
+  cleanupExpiredSessions().catch((err) => console.error('[Auto-Delete Cleanup] Falha:', err));
+}, 60 * 60 * 1000);
 
 // Replace template variables like {{name}} with collected values
 function replaceVariables(text: string, variables: Record<string, string>): string {
@@ -1047,12 +1049,12 @@ function clearDurableWait(session: SessionData) {
   session.waitingIsLiveWhatsApp = undefined;
 }
 
-function scheduleNextNodeDelay(
+async function scheduleNextNodeDelay(
   session: SessionData,
   node: any,
   nextNodeId: string,
   isLiveWhatsApp: boolean
-): boolean {
+): Promise<boolean> {
   if (!node?.data?.nextDelayEnabled || !nextNodeId) return false;
   const dueAt = addDurableWait(
     new Date(),
@@ -1075,16 +1077,16 @@ function scheduleNextNodeDelay(
     content: `Próximo bloco agendado para ${formatBrasiliaDateTime(dueAt)} (Brasília).`,
     timestamp: formatBrasiliaTime(),
   });
-  persistSession(session);
+  await persistSession(session);
   return true;
 }
 
-function scheduleDurableWait(
+async function scheduleDurableWait(
   session: SessionData,
   node: any,
   kind: 'delay' | 'reply_timeout',
   isLiveWhatsApp: boolean
-) {
+): Promise<void> {
   let dueAt: Date;
   if (kind === 'delay' && node.data.delayMode === 'until') {
     dueAt = new Date(node.data.delayUntil || '');
@@ -1110,6 +1112,7 @@ function scheduleDurableWait(
   session.waitingIsLiveWhatsApp = isLiveWhatsApp;
   session.executionCheckpointVersion = 1;
   session.updatedAt = new Date().toISOString();
+  await persistSession(session);
 }
 
 let lastKnownPublicOrigin = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
@@ -1271,7 +1274,8 @@ function saveXPagVariables(session: SessionData, node: any, record: XPagPaymentR
 async function createXPagCharge(
   session: SessionData,
   node: any,
-  isLiveWhatsApp: boolean
+  isLiveWhatsApp: boolean,
+  flowBranchTargets: Partial<Record<XPagFlowBranch, string>> = {}
 ): Promise<{ record: XPagPaymentRecord }> {
   if (!xpagConfig.enabled) {
     throw new Error('A integração XPag está desativada. Ative-a em Pagamentos XPag.');
@@ -1363,6 +1367,9 @@ async function createXPagCharge(
     response: {},
     createdAt: now,
     updatedAt: now,
+    flowOutcomeRoutingEnabled: node.data.xpagWaitForPayment !== false,
+    flowBranchTargets,
+    flowBranchHandledAt: {},
   };
   xpagPayments.set(externalId, record);
   saveXPagPayments();
@@ -1808,7 +1815,7 @@ async function sendMetaWhatsAppMessage(
 // Only one flow runner may mutate a line/contact session at a time. Meta can
 // deliver a second inbound webhook while the first runner is awaiting an API
 // request; without this guard, that message can start the same funnel again.
-const activeFlowExecutionLocks = new Set<string>();
+const flowExecutionCoordinator = new FlowExecutionCoordinator();
 
 async function runFlowStep(
   session: SessionData,
@@ -1816,14 +1823,11 @@ async function runFlowStep(
   allowPaymentPending: boolean = false
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
   const storageKey = sessionStorageKey(session.accountId, session.phoneNumber);
-  if (activeFlowExecutionLocks.has(storageKey)) return { executionErrors: [] };
-
-  activeFlowExecutionLocks.add(storageKey);
-  try {
-    return await executeFlowSteps(session, isLiveWhatsApp, allowPaymentPending);
-  } finally {
-    activeFlowExecutionLocks.delete(storageKey);
-  }
+  const result = await flowExecutionCoordinator.tryRunExclusive(
+    storageKey,
+    () => executeFlowSteps(session, isLiveWhatsApp, allowPaymentPending)
+  );
+  return result.executed && result.value ? result.value : { executionErrors: [] };
 }
 
 // Engine step runner: executes nodes sequentially until a wait_reply or flow end.
@@ -1852,7 +1856,7 @@ async function executeFlowSteps(
       timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     return { executionErrors: [] };
   }
 
@@ -1865,7 +1869,7 @@ async function executeFlowSteps(
       timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     return { executionErrors: [] };
   }
 
@@ -1891,7 +1895,7 @@ async function executeFlowSteps(
     if (!startNode) {
       session.flowCompleted = true;
       session.updatedAt = new Date().toISOString();
-      persistSession(session);
+      await persistSession(session);
       return { executionErrors };
     }
     session.currentNodeId = startNode.id;
@@ -2081,6 +2085,7 @@ async function executeFlowSteps(
       const generatedEdge = edges.find(
         (edge: any) => edge.source === currentNode.id && edge.sourceHandle === 'generated'
       );
+      const flowBranchTargets = buildPaymentBranchTargets(edges, currentNode.id);
 
       if (!isLiveWhatsApp) {
         const isOpenSpei = method === 'SPEI' && currentNode.data.xpagSpeiMode === 'open';
@@ -2117,12 +2122,12 @@ async function executeFlowSteps(
           (edge: any) => edge.source === currentNode.id && !edge.sourceHandle
         );
         if (simulationEdge) {
-          if (scheduleNextNodeDelay(session, currentNode, simulationEdge.target, isLiveWhatsApp)) {
+          if (await scheduleNextNodeDelay(session, currentNode, simulationEdge.target, isLiveWhatsApp)) {
             return { executionErrors, lastLog };
           }
           session.currentNodeId = simulationEdge.target;
           session.executionCheckpointVersion = 1;
-          persistSession(session);
+          await persistSession(session);
           continue;
         }
         session.currentNodeId = null;
@@ -2130,34 +2135,24 @@ async function executeFlowSteps(
         break;
       } else {
         try {
-          const charge = await createXPagCharge(session, currentNode, true);
+          const charge = await createXPagCharge(session, currentNode, true, flowBranchTargets);
           saveXPagVariables(session, currentNode, charge.record, charge.record.response);
-          const shouldWaitForPayment = currentNode.data.xpagWaitForPayment !== false;
-          if (shouldWaitForPayment) {
-            session.waitingForPayment = true;
-            session.waitingPaymentExternalId = charge.record.externalId;
-            session.waitingPaymentNodeId = currentNode.id;
-            session.executionCheckpointVersion = 1;
-            session.updatedAt = new Date().toISOString();
-            persistSession(session);
-          }
-
-          const nextEdge = generatedEdge || (!shouldWaitForPayment
-            ? edges.find((edge: any) => edge.source === currentNode.id && !edge.sourceHandle)
-            : undefined);
+          const nextEdge = generatedEdge || edges.find(
+            (edge: any) => edge.source === currentNode.id && !edge.sourceHandle
+          );
           if (nextEdge) {
-            if (scheduleNextNodeDelay(session, currentNode, nextEdge.target, isLiveWhatsApp)) {
+            if (await scheduleNextNodeDelay(session, currentNode, nextEdge.target, isLiveWhatsApp)) {
               return { executionErrors, lastLog };
             }
             session.currentNodeId = nextEdge.target;
             session.executionCheckpointVersion = 1;
-            persistSession(session);
+            await persistSession(session);
             continue;
           }
           session.currentNodeId = null;
-          session.flowCompleted = !shouldWaitForPayment;
+          session.flowCompleted = true;
           session.updatedAt = new Date().toISOString();
-          persistSession(session);
+          await persistSession(session);
           return { executionErrors, lastLog };
         } catch (err: any) {
           const failedRecord: XPagPaymentRecord = err.paymentRecord || {
@@ -2177,12 +2172,12 @@ async function executeFlowSteps(
             (edge: any) => edge.source === currentNode.id && edge.sourceHandle === 'error'
           );
           if (errorEdge) {
-            if (scheduleNextNodeDelay(session, currentNode, errorEdge.target, isLiveWhatsApp)) {
+            if (await scheduleNextNodeDelay(session, currentNode, errorEdge.target, isLiveWhatsApp)) {
               return { executionErrors, lastLog };
             }
             session.currentNodeId = errorEdge.target;
             session.executionCheckpointVersion = 1;
-            persistSession(session);
+            await persistSession(session);
             continue;
           }
           executionErrors.push(`${err.message || 'Falha ao gerar cobrança na XPag'}${err.errorCode ? ` (${err.errorCode})` : ''}`);
@@ -2195,14 +2190,14 @@ async function executeFlowSteps(
       session.executionCheckpointVersion = 1;
       clearDurableWait(session);
       if (currentNode.data.waitReplyTimeoutEnabled) {
-        scheduleDurableWait(session, currentNode, 'reply_timeout', isLiveWhatsApp);
+        await scheduleDurableWait(session, currentNode, 'reply_timeout', isLiveWhatsApp);
       }
       session.updatedAt = new Date().toISOString();
-      persistSession(session);
+      await persistSession(session);
       return { executionErrors, lastLog };
     } else if (currentNode.type === 'delay') {
       try {
-        scheduleDurableWait(session, currentNode, 'delay', isLiveWhatsApp);
+        await scheduleDurableWait(session, currentNode, 'delay', isLiveWhatsApp);
         session.history.push({
           id: `delay_scheduled_${Date.now()}`,
           sender: 'system',
@@ -2210,7 +2205,7 @@ async function executeFlowSteps(
           content: `Execução agendada para ${formatBrasiliaDateTime(session.waitingUntil!)} (Brasília).`,
           timestamp: formatBrasiliaTime(),
         });
-        persistSession(session);
+        await persistSession(session);
         return { executionErrors, lastLog };
       } catch (err: any) {
         executionErrors.push(err.message || 'Não foi possível agendar a espera.');
@@ -2239,13 +2234,13 @@ async function executeFlowSteps(
     // Find next connected edge
     const outgoingEdge = edges.find((e: any) => e.source === currentNode.id);
     if (outgoingEdge) {
-      if (scheduleNextNodeDelay(session, currentNode, outgoingEdge.target, isLiveWhatsApp)) {
+      if (await scheduleNextNodeDelay(session, currentNode, outgoingEdge.target, isLiveWhatsApp)) {
         return { executionErrors, lastLog };
       }
       session.currentNodeId = outgoingEdge.target;
       session.executionCheckpointVersion = 1;
       session.updatedAt = new Date().toISOString();
-      persistSession(session);
+      await persistSession(session);
     } else {
       session.currentNodeId = null;
       session.waitingForInput = false;
@@ -2255,12 +2250,13 @@ async function executeFlowSteps(
   }
 
   session.updatedAt = new Date().toISOString();
-  persistSession(session);
+  await persistSession(session);
   return { executionErrors, lastLog };
 }
 
 let durableSchedulerReady = false;
 const durableResumeLocks = new Set<string>();
+const durableWorkerId = `${os.hostname()}-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
 
 async function resumeDurableWait(session: SessionData): Promise<void> {
   if (!session.waitingUntil || !session.waitingKind || !session.waitingNodeId) return;
@@ -2306,12 +2302,12 @@ async function resumeDurableWait(session: SessionData): Promise<void> {
     });
     const waitNode = activeFlow.nodes?.find((node: any) => node.id === waitNodeId);
     if (waitKind === 'reply_timeout' && nextNodeId && waitNode) {
-      if (scheduleNextNodeDelay(session, waitNode, nextNodeId, isLiveWhatsApp)) return;
+      if (await scheduleNextNodeDelay(session, waitNode, nextNodeId, isLiveWhatsApp)) return;
     }
     session.currentNodeId = nextNodeId || null;
     session.flowCompleted = !nextNodeId;
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     if (nextNodeId) await runFlowStep(session, isLiveWhatsApp, waitKind === 'node_delay');
   } finally {
     durableResumeLocks.delete(storageKey);
@@ -2320,18 +2316,44 @@ async function resumeDurableWait(session: SessionData): Promise<void> {
 
 async function processDurableWaits(): Promise<void> {
   if (!durableSchedulerReady) return;
-  const dueSessions = Array.from(sessions.values()).filter((session) =>
-    !session.botPaused &&
-    Boolean(session.waitingUntil && session.waitingKind) &&
-    new Date(session.waitingUntil!).getTime() <= Date.now()
+  const dueSessions = await mongoService.claimDueSessions(durableWorkerId, new Date(), 100, 30_000) as SessionData[];
+  for (const claimedSession of dueSessions) {
+    const storageKey = sessionStorageKey(claimedSession.accountId, claimedSession.phoneNumber);
+    sessions.set(storageKey, claimedSession);
+    try {
+      await resumeDurableWait(claimedSession);
+    } catch (err) {
+      console.error(`[Agendador Persistente] Falha ao processar ${storageKey}; o lease permitirá nova tentativa:`, err);
+    }
+  }
+}
+
+async function releaseLegacyGeneratedPaymentWait(session: SessionData): Promise<boolean> {
+  if (!session.waitingForPayment || !session.waitingPaymentNodeId) return false;
+  const account = whatsappAccounts.find((item) => item.id === session.accountId);
+  const activeFlow = account?.flow ||
+    ((!session.accountId || session.accountId === 'unassigned') ? currentFlow : { nodes: [], edges: [] });
+  const generatedEdge = activeFlow.edges?.find(
+    (edge: any) => edge.source === session.waitingPaymentNodeId && edge.sourceHandle === 'generated'
   );
-  for (const session of dueSessions) await resumeDurableWait(session);
+  if (!generatedEdge) return false;
+
+  session.waitingForPayment = false;
+  session.waitingPaymentExternalId = undefined;
+  session.waitingPaymentNodeId = undefined;
+  if (!session.currentNodeId) session.currentNodeId = generatedEdge.target;
+  session.flowCompleted = false;
+  session.executionCheckpointVersion = 1;
+  session.updatedAt = new Date().toISOString();
+  await persistSession(session);
+  return true;
 }
 
 async function restorePersistedExecutions(): Promise<void> {
   durableSchedulerReady = true;
   await processDurableWaits();
   for (const session of sessions.values()) {
+    await releaseLegacyGeneratedPaymentWait(session);
     if (
       session.phoneNumber === 'simulator_user' ||
       session.botPaused ||
@@ -2359,8 +2381,6 @@ setInterval(() => {
   processDurableWaits().catch((err) => console.error('[Agendador Persistente] Falha ao retomar funis:', err));
 }, 1000);
 
-type XPagFlowBranch = 'paid' | 'error' | 'expired';
-
 async function resumeXPagFlowBranch(
   record: XPagPaymentRecord,
   branch: XPagFlowBranch,
@@ -2371,7 +2391,11 @@ async function resumeXPagFlowBranch(
     Array.from(sessions.values()).find(
       (item) => item.phoneNumber === record.sessionPhoneNumber && (!record.accountId || item.accountId === record.accountId)
     );
-  if (!session || session.waitingPaymentExternalId !== record.externalId) return false;
+  if (!session || record.flowOutcomeRoutingEnabled === false) return false;
+
+  const storageKey = sessionStorageKey(session.accountId, session.phoneNumber);
+  await flowExecutionCoordinator.waitForIdle(storageKey);
+  if (record.flowBranchHandledAt?.[branch]) return true;
 
   const account = whatsappAccounts.find((item) => item.id === session.accountId);
   const activeFlow = account?.flow ||
@@ -2379,38 +2403,51 @@ async function resumeXPagFlowBranch(
   const paymentNode = activeFlow.nodes?.find((node: any) => node.id === record.nodeId);
   if (paymentNode) saveXPagVariables(session, paymentNode, record, response, error);
 
-  session.waitingForPayment = false;
-  session.waitingPaymentExternalId = undefined;
-  session.waitingPaymentNodeId = undefined;
-  session.flowCompleted = false;
-  session.history.push({
-    id: `xpag_${branch}_${Date.now()}`,
-    sender: 'system',
-    type: 'info',
-    content: branch === 'paid'
-      ? 'Pagamento XPag confirmado; continuando pela saída Paga.'
-      : branch === 'expired'
-        ? 'Cobrança XPag expirada; continuando pela saída Expirada.'
-        : 'Cobrança XPag encerrada com erro; continuando pela saída Erro.',
-    timestamp: formatBrasiliaTime(),
-  });
+  const branchTarget = resolvePaymentBranchTarget(
+    record.flowBranchTargets,
+    branch,
+    activeFlow.edges || [],
+    record.nodeId
+  );
+  const outgoingEdge = branchTarget ? { target: branchTarget } : undefined;
 
-  const outgoingEdge = activeFlow.edges?.find(
-    (edge: any) => edge.source === record.nodeId && edge.sourceHandle === branch
-  ) || (branch === 'paid'
-    ? activeFlow.edges?.find((edge: any) => edge.source === record.nodeId && !edge.sourceHandle)
-    : undefined);
+  record.flowBranchHandledAt = {
+    ...(record.flowBranchHandledAt || {}),
+    [branch]: new Date().toISOString(),
+  };
+  saveXPagPayments();
+
+  // A confirmed payment supersedes the route that started at "Gerada". Other
+  // terminal events only change the route when their output is connected.
+  const transition = transitionPaymentBranch(session, branch, outgoingEdge?.target);
+  if (transition.routeChanged) {
+    Object.assign(session, transition.nextState);
+    session.history.push({
+      id: `xpag_${branch}_${Date.now()}`,
+      sender: 'system',
+      type: 'info',
+      content: outgoingEdge
+        ? branch === 'paid'
+          ? 'Pagamento XPag confirmado; seguindo pela saída Paga.'
+          : branch === 'expired'
+            ? 'Cobrança XPag expirada; seguindo pela saída Expirada.'
+            : 'Cobrança XPag encerrada com erro; seguindo pela saída Erro.'
+        : 'Pagamento XPag confirmado; a execução atual foi finalizada porque não há saída Paga conectada.',
+      timestamp: formatBrasiliaTime(),
+    });
+  }
+
+  session.updatedAt = new Date().toISOString();
+  await persistSession(session);
+
+  if (!outgoingEdge) return true;
 
   if (outgoingEdge && paymentNode) {
-    if (scheduleNextNodeDelay(session, paymentNode, outgoingEdge.target, record.isLiveWhatsApp)) {
+    if (await scheduleNextNodeDelay(session, paymentNode, outgoingEdge.target, record.isLiveWhatsApp)) {
       return true;
     }
   }
-  session.currentNodeId = outgoingEdge?.target || null;
-  if (!outgoingEdge) session.flowCompleted = true;
-  session.updatedAt = new Date().toISOString();
-  persistSession(session);
-  if (outgoingEdge) await runFlowStep(session, record.isLiveWhatsApp);
+  await runFlowStep(session, record.isLiveWhatsApp);
   return true;
 }
 
@@ -2495,16 +2532,16 @@ async function handleIncomingUserMessage(
   // If human agent paused the bot, only record message without executing flow
   if (session.botPaused) {
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     return { executionErrors: [] };
   }
 
   // The inbound message is already stored above, but it must not restart or
   // advance the funnel while another runner is sending the current sequence.
   const storageKey = sessionStorageKey(session.accountId, session.phoneNumber);
-  if (activeFlowExecutionLocks.has(storageKey)) {
+  if (flowExecutionCoordinator.isActive(storageKey)) {
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     return { executionErrors: [] };
   }
 
@@ -2512,7 +2549,7 @@ async function handleIncomingUserMessage(
   // but only the explicit restart action may open a new execution.
   if (session.flowCompleted) {
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     return { executionErrors: [] };
   }
 
@@ -2527,7 +2564,7 @@ async function handleIncomingUserMessage(
       timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     return { executionErrors: [] };
   }
 
@@ -2551,7 +2588,7 @@ async function handleIncomingUserMessage(
         (e: any) => e.source === currentNode.id && e.sourceHandle === 'answered'
       ) || edges.find((e: any) => e.source === currentNode.id && !e.sourceHandle);
       if (outgoingEdge) {
-        if (scheduleNextNodeDelay(session, currentNode, outgoingEdge.target, isLiveWhatsApp)) {
+        if (await scheduleNextNodeDelay(session, currentNode, outgoingEdge.target, isLiveWhatsApp)) {
           return { executionErrors: [] };
         }
         session.currentNodeId = outgoingEdge.target;
@@ -2559,7 +2596,7 @@ async function handleIncomingUserMessage(
       } else {
         session.currentNodeId = null;
         session.flowCompleted = true;
-        persistSession(session);
+        await persistSession(session);
         return { executionErrors: [] };
       }
     }
@@ -2583,7 +2620,7 @@ async function handleIncomingUserMessage(
       timestamp: formatBrasiliaTime(),
     });
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
     return { executionErrors: [] };
   }
 
@@ -2626,11 +2663,14 @@ async function startServer() {
     r2Config: r2StorageService.getConfig(),
     xpagConfig,
     metaCapiConfig: metaCapiConfigs,
-    sessions: Array.from(sessions.values()),
     accounts: whatsappAccounts,
     logs: apiLogs,
     xpagPayments: Array.from(xpagPayments.values()),
   });
+
+  if (!mongoService.isConnected()) {
+    throw new Error('MongoDB é obrigatório para iniciar o FluxoZap com persistência durável. Verifique a conexão.');
+  }
 
   // Load the dedicated FluxoZap collections into memory. Flow definitions are
   // hydrated only from MongoDB and are never restored from local JSON.
@@ -2645,21 +2685,28 @@ async function startServer() {
         if (doc.config?.phoneNumberId) {
           metaConfig = { ...metaConfig, ...doc.config };
         }
-        if (doc.sessions && doc.sessions.length > 0) {
-          for (const s of doc.sessions) {
-            const key = sessionStorageKey(s.accountId, s.phoneNumber);
-            const localSession = sessions.get(key);
-            const localUpdatedAt = localSession?.updatedAt ? new Date(localSession.updatedAt).getTime() : 0;
-            const mongoUpdatedAt = s?.updatedAt ? new Date(s.updatedAt).getTime() : 0;
-            // A hard shutdown can happen after the synchronous JSON checkpoint
-            // and before Mongo finishes its async write. Keep whichever copy is newer.
-            if (!localSession || mongoUpdatedAt >= localUpdatedAt) {
-              const hydratedSession = s as SessionData;
-              hydratedSession.autoDeleteDays = SESSION_RETENTION_DAYS;
-              hydratedSession.autoDeleteAt = new Date(new Date(hydratedSession.updatedAt || hydratedSession.createdAt).getTime() + SESSION_RETENTION_DAYS * 86400000).toISOString();
-              sessions.set(key, hydratedSession);
-            }
-          }
+        const migrationCompleted = await mongoService.isMigrationCompleted(LEGACY_SESSIONS_MIGRATION);
+        const legacySessions = migrationCompleted ? [] : readLegacySessionsForMigration();
+        const mergedSessions = mergeLegacyAndMongoSessions(
+          (doc.sessions || []) as SessionData[],
+          legacySessions
+        );
+        sessions.clear();
+        for (const rawSession of mergedSessions.sessions) {
+          const hydratedSession = rawSession as SessionData;
+          hydratedSession.autoDeleteDays = SESSION_RETENTION_DAYS;
+          hydratedSession.autoDeleteAt = new Date(
+            new Date(hydratedSession.updatedAt || hydratedSession.createdAt).getTime() + SESSION_RETENTION_DAYS * 86400000
+          ).toISOString();
+          sessions.set(sessionStorageKey(hydratedSession.accountId, hydratedSession.phoneNumber), hydratedSession);
+        }
+        if (!migrationCompleted) {
+          await mongoService.saveSessions(Array.from(sessions.values()));
+          await mongoService.completeMigration(LEGACY_SESSIONS_MIGRATION);
+          console.log(
+            `[Migração Mongo] Sessões legadas concluídas: ${mergedSessions.importedLegacyCount} importadas/atualizadas; ` +
+            `${sessions.size} sessões preservadas no total. O JSON antigo não receberá novas escritas.`
+          );
         }
         if (doc.logs && doc.logs.length > 0) {
           apiLogs = (doc.logs as ApiLogEntry[]).filter((log) => isRecentApiLog(log)).slice(0, 200);
@@ -2691,15 +2738,14 @@ async function startServer() {
           saveXPagPayments();
         }
         for (const session of sessions.values()) refreshDefaultSessionVariables(session);
-        saveSessionsToFile();
-        await Promise.all(Array.from(sessions.values()).map((session) => mongoService.saveSession(session)));
+        await mongoService.saveSessions(Array.from(sessions.values()));
       }
     } catch (err) {
       console.error('[MongoDB Atlas] Error syncing initial data from FluxoZap collections:', err);
     }
   }
 
-  // Mongo/JSON hydration is complete. Resume due waits and any execution that
+  // Mongo hydration and the one-time legacy import are complete. Resume due waits and any execution that
   // had already checkpointed its next node before the previous shutdown.
   await restorePersistedExecutions();
 
@@ -3974,7 +4020,15 @@ async function startServer() {
       account.isDefault = true;
     }
 
-    if (name !== undefined) account.name = name.trim();
+    if (name !== undefined) {
+      let normalizedName: string;
+      try {
+        normalizedName = normalizeAccountName(name);
+      } catch (err: any) {
+        return res.status(400).json({ success: false, error: 'O nome da linha não pode ficar vazio.' });
+      }
+      account.name = normalizedName;
+    }
     if (phoneNumber !== undefined) account.phoneNumber = phoneNumber.trim();
     if (phoneNumberId !== undefined) {
       const normalizedPhoneNumberId = phoneNumberId.trim();
@@ -4317,7 +4371,7 @@ async function startServer() {
                       historyItem.status = nextStatus;
                     }
                     session.updatedAt = new Date().toISOString();
-                    persistSession(session);
+                    await persistSession(session);
                   }
                 }
               }
@@ -4407,7 +4461,7 @@ async function startServer() {
                 if (!session.botPaused) {
                   await handleIncomingUserMessage(session, textContent, true);
                 } else {
-                  persistSession(session);
+                  await persistSession(session);
                 }
               } else if (msg.type === 'audio' || msg.type === 'voice') {
                 textContent = '[Áudio de Voz Recebido]';
@@ -4432,7 +4486,7 @@ async function startServer() {
                 if (!session.botPaused) {
                   await handleIncomingUserMessage(session, textContent, true);
                 } else {
-                  persistSession(session);
+                  await persistSession(session);
                 }
               } else if (msg.type === 'document') {
                 textContent = msg.document?.caption || msg.document?.filename || '[Documento Recebido]';
@@ -4459,7 +4513,7 @@ async function startServer() {
                 if (!session.botPaused) {
                   await handleIncomingUserMessage(session, textContent, true);
                 } else {
-                  persistSession(session);
+                  await persistSession(session);
                 }
               } else if (msg.type === 'video') {
                 textContent = msg.video?.caption || '[Vídeo Recebido]';
@@ -4485,7 +4539,7 @@ async function startServer() {
                 if (!session.botPaused) {
                   await handleIncomingUserMessage(session, textContent, true);
                 } else {
-                  persistSession(session);
+                  await persistSession(session);
                 }
               } else if (msg.type === 'interactive') {
                 textContent = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '';
@@ -4620,7 +4674,7 @@ async function startServer() {
 
       session.history.push(msgItem);
       session.updatedAt = new Date().toISOString();
-      persistSession(session);
+      await persistSession(session);
 
       if (!sendResult.success) {
         return res.status(400).json({
@@ -4662,7 +4716,7 @@ async function startServer() {
       await runFlowStep(session, true);
     }
 
-    persistSession(session);
+    await persistSession(session);
     res.json({
       success: true,
       message: `Funil restaurado para ${cleanPhone}! ${triggerNow ? 'Fluxo reiniciado agora.' : 'O contato receberá o funil ao enviar a próxima mensagem.'}`,
@@ -4671,7 +4725,7 @@ async function startServer() {
   });
 
   // API: Toggle Bot Pause/Resume for Human Agent
-  app.post('/api/sessions/:phoneNumber/toggle-bot', (req: Request, res: Response) => {
+  app.post('/api/sessions/:phoneNumber/toggle-bot', async (req: Request, res: Response) => {
     const { phoneNumber } = req.params;
     const cleanPhone = phoneNumber.replace(/\D/g, '');
     const account = whatsappAccounts.find((item) => item.id === req.body?.accountId);
@@ -4680,7 +4734,7 @@ async function startServer() {
 
     session.botPaused = !session.botPaused;
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
 
     res.json({
       success: true,
@@ -4702,17 +4756,14 @@ async function startServer() {
     if (!targetAccount) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
     const targetAccountId = targetAccount.id;
     sessions.delete(sessionStorageKey(targetAccountId, cleanPhone));
-    saveSessionsToFile();
 
-    if (mongoService.isConnected()) {
-      await mongoService.deleteSession(targetAccountId, cleanPhone);
-    }
+    await mongoService.deleteSession(targetAccountId, cleanPhone);
 
     res.json({ success: true, message: `Conversa e lead de ${cleanPhone} excluídos com sucesso.` });
   });
 
   // API: Clear conversation history
-  app.post('/api/sessions/:phoneNumber/clear-history', (req: Request, res: Response) => {
+  app.post('/api/sessions/:phoneNumber/clear-history', async (req: Request, res: Response) => {
     const { phoneNumber } = req.params;
     const cleanPhone = phoneNumber.replace(/\D/g, '');
     const account = whatsappAccounts.find((item) => item.id === req.body?.accountId);
@@ -4721,14 +4772,14 @@ async function startServer() {
 
     session.history = [];
     session.updatedAt = new Date().toISOString();
-    persistSession(session);
+    await persistSession(session);
 
     res.json({ success: true, message: 'Histórico da conversa limpo.', session });
   });
 
   // API: Cleanup expired sessions (> 17 days)
-  app.post('/api/sessions/cleanup-expired', (_req: Request, res: Response) => {
-    cleanupExpiredSessions();
+  app.post('/api/sessions/cleanup-expired', async (_req: Request, res: Response) => {
+    await cleanupExpiredSessions();
     res.json({ success: true, message: 'Limpeza de conversas expiradas concluída.' });
   });
 

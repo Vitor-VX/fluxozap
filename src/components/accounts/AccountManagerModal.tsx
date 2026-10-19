@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Loader2,
   Radio,
+  Pencil,
 } from 'lucide-react';
 import { WhatsAppAccount } from '../../types/flow';
 
@@ -43,6 +44,9 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
   const [isCreating, setIsCreating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [savingAccountName, setSavingAccountName] = useState(false);
 
   // New account form state
   const [formData, setFormData] = useState({
@@ -143,6 +147,39 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
     }
   };
 
+  const startEditingName = (account: WhatsAppAccount, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingAccountId(account.id);
+    setEditingName(account.name);
+    setError(null);
+  };
+
+  const saveAccountName = async (accountId: string) => {
+    const name = editingName.trim();
+    if (!name) {
+      setError('O nome da linha não pode ficar vazio.');
+      return;
+    }
+    setSavingAccountName(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/accounts/${accountId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Não foi possível alterar o nome da linha.');
+      setEditingAccountId(null);
+      setEditingName('');
+      onRefreshAccounts();
+    } catch (err: any) {
+      setError(err.message || 'Erro ao alterar o nome da linha.');
+    } finally {
+      setSavingAccountName(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -230,9 +267,30 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
 
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900 text-sm truncate">
-                            {acc.name}
-                          </span>
+                          {editingAccountId === acc.id ? (
+                            <input
+                              autoFocus
+                              value={editingName}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => setEditingName(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  saveAccountName(acc.id);
+                                }
+                                if (event.key === 'Escape') {
+                                  setEditingAccountId(null);
+                                  setEditingName('');
+                                }
+                              }}
+                              className="min-w-0 max-w-56 rounded-md border border-emerald-300 bg-white px-2 py-1 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500/20"
+                              aria-label={`Novo nome para ${acc.name}`}
+                            />
+                          ) : (
+                            <span className="font-bold text-slate-900 text-sm truncate">
+                              {acc.name}
+                            </span>
+                          )}
                           {acc.isDefault && (
                             <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px] border border-slate-200">
                               Padrão
@@ -254,6 +312,43 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
+                      {editingAccountId === acc.id ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              saveAccountName(acc.id);
+                            }}
+                            disabled={savingAccountName}
+                            title="Salvar novo nome"
+                            className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 cursor-pointer transition-colors"
+                          >
+                            {savingAccountName ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditingAccountId(null);
+                              setEditingName('');
+                            }}
+                            title="Cancelar edição"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(event) => startEditingName(acc, event)}
+                          title="Editar nome da linha"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 cursor-pointer transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
                       {!acc.isDefault && (
                         <button
                           type="button"

@@ -890,9 +890,9 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 className="mt-0.5 w-4 h-4 accent-violet-600"
               />
               <span>
-                <strong className="block text-slate-800">Aguardar confirmação</strong>
+                <strong className="block text-slate-800">Acompanhar confirmação do pagamento</strong>
                 <span className="text-[10px] text-slate-500 leading-relaxed">
-                  A saída Gerada roda imediatamente para você enviar as instruções. Depois, a sessão aguarda o webhook e continua pela saída Paga, Erro ou Expirada.
+                  A saída Gerada continua imediatamente sem bloquear o funil. Quando o status mudar, o webhook troca a execução para a saída Paga, Erro ou Expirada que estiver conectada, mesmo após um bloco Finalizar.
                 </span>
               </span>
             </label>

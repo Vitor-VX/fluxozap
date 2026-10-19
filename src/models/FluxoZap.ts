@@ -9,6 +9,7 @@ const ProjectConfigSchema = new Schema(
     r2: { type: Schema.Types.Mixed, default: {} },
     xpag: { type: Schema.Types.Mixed, default: {} },
     metaCapi: { type: Schema.Types.Mixed, default: {} },
+    migrations: { type: Schema.Types.Mixed, default: {} },
   },
   { ...options, collection: 'project_configs' }
 );
@@ -26,10 +27,22 @@ const SessionSchema = new Schema(
     phoneNumber: { type: String, required: true },
     accountId: { type: String, required: true },
     data: { type: Schema.Types.Mixed, required: true },
+    schedulerStatus: { type: String },
+    waitingUntil: { type: Date },
+    waitingKind: { type: String },
+    waitingNodeId: { type: String },
+    waitingNextNodeId: { type: String },
+    leaseOwner: { type: String },
+    leaseUntil: { type: Date },
+    resumeAttempts: { type: Number },
   },
   { ...options, collection: 'sessions' }
 );
 SessionSchema.index({ accountId: 1, phoneNumber: 1 }, { unique: true });
+SessionSchema.index(
+  { schedulerStatus: 1, waitingUntil: 1, leaseUntil: 1 },
+  { partialFilterExpression: { schedulerStatus: 'waiting' } }
+);
 
 const WhatsAppAccountSchema = new Schema(
   {
