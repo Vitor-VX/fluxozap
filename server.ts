@@ -1805,8 +1805,29 @@ async function sendMetaWhatsAppMessage(
   }
 }
 
-// Engine step runner: executes nodes sequentially until a wait_reply or flow end
+// Only one flow runner may mutate a line/contact session at a time. Meta can
+// deliver a second inbound webhook while the first runner is awaiting an API
+// request; without this guard, that message can start the same funnel again.
+const activeFlowExecutionLocks = new Set<string>();
+
 async function runFlowStep(
+  session: SessionData,
+  isLiveWhatsApp: boolean = false,
+  allowPaymentPending: boolean = false
+): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
+  const storageKey = sessionStorageKey(session.accountId, session.phoneNumber);
+  if (activeFlowExecutionLocks.has(storageKey)) return { executionErrors: [] };
+
+  activeFlowExecutionLocks.add(storageKey);
+  try {
+    return await executeFlowSteps(session, isLiveWhatsApp, allowPaymentPending);
+  } finally {
+    activeFlowExecutionLocks.delete(storageKey);
+  }
+}
+
+// Engine step runner: executes nodes sequentially until a wait_reply or flow end.
+async function executeFlowSteps(
   session: SessionData,
   isLiveWhatsApp: boolean = false,
   allowPaymentPending: boolean = false
@@ -2473,6 +2494,15 @@ async function handleIncomingUserMessage(
 
   // If human agent paused the bot, only record message without executing flow
   if (session.botPaused) {
+    session.updatedAt = new Date().toISOString();
+    persistSession(session);
+    return { executionErrors: [] };
+  }
+
+  // The inbound message is already stored above, but it must not restart or
+  // advance the funnel while another runner is sending the current sequence.
+  const storageKey = sessionStorageKey(session.accountId, session.phoneNumber);
+  if (activeFlowExecutionLocks.has(storageKey)) {
     session.updatedAt = new Date().toISOString();
     persistSession(session);
     return { executionErrors: [] };
