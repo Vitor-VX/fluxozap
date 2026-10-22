@@ -11,6 +11,11 @@ import { r2StorageService } from './src/services/r2Storage';
 import { normalizeAccountName } from './src/services/accountValidation';
 import { mergeLegacyAndMongoSessions } from './src/services/legacySessionMigration';
 import {
+  DEFAULT_SALE_MUSIC_SETTINGS,
+  normalizeSaleMusicSettings,
+  validateSaleMusicSettings,
+} from './src/services/saleMusicSettings';
+import {
   buildPaymentBranchTargets,
   canStartFlowFromInboundMessage,
   DURABLE_EXECUTION_CHECKPOINT_VERSION,
@@ -3200,6 +3205,36 @@ async function startServer() {
       res.json({ events, cursor: until.toISOString() });
     } catch (err: any) {
       res.status(500).json({ events: [], cursor: until.toISOString(), error: err.message || 'Não foi possível consultar novas vendas.' });
+    }
+  });
+
+  app.get('/api/sale-music/config', async (_req: Request, res: Response) => {
+    try {
+      const stored = await mongoService.getSaleMusicConfig();
+      const configured = Boolean(stored?.configured);
+      res.json({
+        configured,
+        settings: configured
+          ? normalizeSaleMusicSettings(stored.settings || stored)
+          : DEFAULT_SALE_MUSIC_SETTINGS,
+        updatedAt: stored?.updatedAt || null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Não foi possível carregar o alerta musical.' });
+    }
+  });
+
+  app.post('/api/sale-music/config', async (req: Request, res: Response) => {
+    try {
+      const settings = normalizeSaleMusicSettings(req.body?.settings || req.body);
+      const validationError = validateSaleMusicSettings(settings);
+      if (validationError) return res.status(400).json({ success: false, error: validationError });
+      const updatedAt = new Date().toISOString();
+      const saved = await mongoService.saveSaleMusicConfig({ configured: true, settings, updatedAt });
+      if (!saved) return res.status(503).json({ success: false, error: 'MongoDB indisponível para salvar a configuração global.' });
+      res.json({ success: true, configured: true, settings, updatedAt });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Não foi possível salvar o alerta musical.' });
     }
   });
 

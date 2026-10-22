@@ -1,18 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BellRing, CheckCircle2, ExternalLink, Music2, Play, Radio, Save, Square, Volume2 } from 'lucide-react';
+import {
+  DEFAULT_SALE_MUSIC_SETTINGS,
+  normalizeSaleMusicSettings,
+  parseSaleMusicTimecode,
+  type SaleMusicPresetTone,
+  type SaleMusicSettings,
+} from '../../services/saleMusicSettings';
 
-type AudioSource = 'preset' | 'mp3' | 'youtube';
-type PresetTone = 'cash' | 'chime' | 'bell';
-
-interface MusicSettings {
-  source: AudioSource;
-  preset: PresetTone;
-  url: string;
-  durationSeconds: number;
-  volume: number;
-  youtubeStart: string;
-  youtubeEnd: string;
-}
+type MusicSettings = SaleMusicSettings;
+type PresetTone = SaleMusicPresetTone;
 
 interface SaleNotification {
   id: string;
@@ -25,21 +22,12 @@ interface SaleNotification {
 
 const SETTINGS_KEY = 'fluxozap:sale-music:settings';
 const PROCESSED_KEY = 'fluxozap:sale-music:processed-events';
-const DEFAULT_SETTINGS: MusicSettings = {
-  source: 'preset',
-  preset: 'cash',
-  url: '',
-  durationSeconds: 30,
-  volume: 80,
-  youtubeStart: '00:00',
-  youtubeEnd: '00:30',
-};
 
-function loadSettings(): MusicSettings {
+function readLocalSettings(): MusicSettings | null {
   try {
     const value = JSON.parse(window.localStorage.getItem(SETTINGS_KEY) || 'null');
-    return value ? { ...DEFAULT_SETTINGS, ...value } : DEFAULT_SETTINGS;
-  } catch { return DEFAULT_SETTINGS; }
+    return value ? normalizeSaleMusicSettings(value) : null;
+  } catch { return null; }
 }
 
 function youtubeVideoId(value: string): string {
@@ -55,27 +43,15 @@ function youtubeVideoId(value: string): string {
   return '';
 }
 
-function parseTimecode(value: string): number | null {
-  const parts = value.trim().split(':');
-  if (parts.length < 1 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
-  const numbers = parts.map(Number);
-  if (numbers.some((part) => !Number.isFinite(part))) return null;
-  if (parts.length > 1 && numbers.at(-1)! >= 60) return null;
-  if (parts.length === 3 && numbers[1] >= 60) return null;
-  if (parts.length === 1) return numbers[0];
-  if (parts.length === 2) return numbers[0] * 60 + numbers[1];
-  return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
-}
-
 function money(amount: number, currency: string): string {
   try { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency }).format(amount); }
   catch { return `${currency} ${amount.toFixed(2)}`; }
 }
 
 export const MusicNotificationPage: React.FC = () => {
-  const [settings, setSettings] = useState<MusicSettings>(loadSettings);
+  const [settings, setSettings] = useState<MusicSettings>(() => readLocalSettings() || DEFAULT_SALE_MUSIC_SETTINGS);
   const [enabled, setEnabled] = useState(false);
-  const [status, setStatus] = useState('Clique em “Ativar alertas” para começar.');
+  const [status, setStatus] = useState('Carregando configuração global...');
   const [lastSale, setLastSale] = useState<SaleNotification | null>(null);
   const [saved, setSaved] = useState(false);
   const [youtubeReady, setYoutubeReady] = useState(false);
@@ -129,13 +105,16 @@ export const MusicNotificationPage: React.FC = () => {
     if (settings.source === 'youtube') {
       if (!youtubeId) throw new Error('Informe uma URL válida do YouTube.');
       if (!youtubeReady) throw new Error('O player do YouTube ainda está carregando. Tente novamente em instantes.');
-      const startAt = parseTimecode(settings.youtubeStart);
-      const endAt = parseTimecode(settings.youtubeEnd);
+      const startAt = parseSaleMusicTimecode(settings.youtubeStart);
+      const endAt = parseSaleMusicTimecode(settings.youtubeEnd);
       if (startAt === null || endAt === null) throw new Error('Use um horário válido, como 1:10 ou 01:30.');
       if (endAt <= startAt) throw new Error('O final do trecho precisa ser posterior ao início.');
       youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [settings.volume] }), '*');
-      youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [startAt, true] }), '*');
-      youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+      youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({
+        event: 'command',
+        func: 'loadVideoById',
+        args: [{ videoId: youtubeId, startSeconds: startAt, endSeconds: endAt }],
+      }), '*');
       stopTimerRef.current = window.setTimeout(stopPlayback, (endAt - startAt) * 1000);
       return;
     } else {
@@ -147,24 +126,32 @@ export const MusicNotificationPage: React.FC = () => {
     stopTimerRef.current = window.setTimeout(stopPlayback, settings.durationSeconds * 1000);
   };
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
     if (settings.source === 'youtube') {
-      const startAt = parseTimecode(settings.youtubeStart);
-      const endAt = parseTimecode(settings.youtubeEnd);
+      const startAt = parseSaleMusicTimecode(settings.youtubeStart);
+      const endAt = parseSaleMusicTimecode(settings.youtubeEnd);
       if (startAt === null || endAt === null || endAt <= startAt) {
         setStatus('Revise o início e o fim do trecho do YouTube. Exemplo: 1:10 até 1:30.');
         return;
       }
     }
-    const normalized = {
-      ...settings,
-      durationSeconds: Math.min(300, Math.max(1, Number(settings.durationSeconds) || 30)),
-      volume: Math.min(100, Math.max(0, Number(settings.volume) || 0)),
-    };
-    setSettings(normalized);
-    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(normalized));
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2000);
+    try {
+      const normalized = normalizeSaleMusicSettings(settings);
+      const response = await fetch('/api/sale-music/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: normalized }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Não foi possível salvar a música global.');
+      setSettings(payload.settings);
+      window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload.settings));
+      setStatus('Configuração global salva para todos os usuários do painel.');
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+    } catch (error: any) {
+      setStatus(error.message || 'Não foi possível salvar a música global.');
+    }
   };
 
   const getProcessed = (): Set<string> => {
@@ -214,6 +201,40 @@ export const MusicNotificationPage: React.FC = () => {
   };
 
   useEffect(() => {
+    let disposed = false;
+    const hydrateGlobalSettings = async () => {
+      try {
+        const response = await fetch('/api/sale-music/config', { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Não foi possível carregar a música global.');
+        let globalSettings = payload.configured ? normalizeSaleMusicSettings(payload.settings) : null;
+        const localSettings = readLocalSettings();
+        if (!globalSettings && localSettings) {
+          const migrationResponse = await fetch('/api/sale-music/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: localSettings }),
+          });
+          const migrationPayload = await migrationResponse.json();
+          if (!migrationResponse.ok) throw new Error(migrationPayload.error || 'Não foi possível migrar a música salva.');
+          globalSettings = normalizeSaleMusicSettings(migrationPayload.settings);
+        }
+        if (disposed) return;
+        const resolved = globalSettings || DEFAULT_SALE_MUSIC_SETTINGS;
+        setSettings(resolved);
+        if (globalSettings) window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(resolved));
+        setStatus(globalSettings
+          ? 'Configuração global carregada do banco de dados.'
+          : 'Nenhuma música global configurada. Escolha uma opção e salve.');
+      } catch (error: any) {
+        if (!disposed) setStatus(error.message || 'Não foi possível carregar a música global.');
+      }
+    };
+    hydrateGlobalSettings();
+    return () => { disposed = true; };
+  }, []);
+
+  useEffect(() => {
     if (!enabled) return;
     pollingRef.current = window.setInterval(pollSales, 4000);
     return () => {
@@ -253,7 +274,7 @@ export const MusicNotificationPage: React.FC = () => {
         </section>
 
         <section className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900 p-6">
-          <div><h2 className="flex items-center gap-2 text-lg font-bold"><BellRing className="h-5 w-5 text-amber-400" />Configurar som</h2><p className="mt-1 text-sm text-slate-400">A configuração fica salva neste navegador.</p></div>
+          <div><h2 className="flex items-center gap-2 text-lg font-bold"><BellRing className="h-5 w-5 text-amber-400" />Configurar som</h2><p className="mt-1 text-sm text-slate-400">A configuração fica salva globalmente e vale para todos os usuários do painel.</p></div>
           <div className="grid gap-3 sm:grid-cols-3">
             {([['preset', 'Toque padrão'], ['mp3', 'Link MP3'], ['youtube', 'YouTube']] as const).map(([value, label]) => (
               <button key={value} type="button" onClick={() => setSettings((current) => ({ ...current, source: value }))} className={`rounded-xl border px-4 py-3 text-sm font-bold ${settings.source === value ? 'border-emerald-400 bg-emerald-400/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400'}`}>{label}</button>
@@ -308,7 +329,7 @@ export const MusicNotificationPage: React.FC = () => {
           <iframe
             ref={youtubeFrameRef}
             title="Player do alerta"
-            src={`https://www.youtube.com/embed/${youtubeId}?enablejsapi=1&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
+            src={`https://www.youtube.com/embed/${youtubeId}?enablejsapi=1&playsinline=1&start=${parseSaleMusicTimecode(settings.youtubeStart) || 0}&end=${parseSaleMusicTimecode(settings.youtubeEnd) || 0}&origin=${encodeURIComponent(window.location.origin)}`}
             allow="autoplay"
             onLoad={() => setYoutubeReady(true)}
             className="pointer-events-none fixed h-px w-px opacity-0"

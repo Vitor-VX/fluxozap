@@ -28,6 +28,7 @@ export interface ProjectSnapshot {
   r2Config?: any;
   xpagConfig?: any;
   metaCapiConfig?: any;
+  saleMusicConfig?: any;
   flow?: any;
   flows?: any[];
   sessions?: any[];
@@ -239,6 +240,7 @@ class MongoService {
       r2Config: (project as any)?.r2 || {},
       xpagConfig: (project as any)?.xpag || {},
       metaCapiConfig: (project as any)?.metaCapi || {},
+      saleMusicConfig: (project as any)?.saleMusic || {},
       flow: (flows[0] as any)?.data,
       flows: flows.map((item: any) => item.data),
       sessions: sessions.map((item: any) => item.data),
@@ -304,6 +306,18 @@ class MongoService {
   public async saveMetaCapiConfig(data: any): Promise<boolean> {
     if (!this.isConnected()) return false;
     await ProjectConfig.updateOne({ identifier: 'default' }, { $set: { metaCapi: data } }, { upsert: true });
+    return true;
+  }
+
+  public async getSaleMusicConfig(): Promise<any | null> {
+    if (!this.isConnected()) return null;
+    const project = await ProjectConfig.findOne({ identifier: 'default' }).select('saleMusic').lean();
+    return (project as any)?.saleMusic || null;
+  }
+
+  public async saveSaleMusicConfig(data: any): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    await ProjectConfig.updateOne({ identifier: 'default' }, { $set: { saleMusic: data } }, { upsert: true });
     return true;
   }
 

@@ -9,6 +9,7 @@ const ProjectConfigSchema = new Schema(
     r2: { type: Schema.Types.Mixed, default: {} },
     xpag: { type: Schema.Types.Mixed, default: {} },
     metaCapi: { type: Schema.Types.Mixed, default: {} },
+    saleMusic: { type: Schema.Types.Mixed, default: {} },
     migrations: { type: Schema.Types.Mixed, default: {} },
   },
   { ...options, collection: 'project_configs' }

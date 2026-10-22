@@ -1,18 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Music2, X } from 'lucide-react';
+import {
+  DEFAULT_SALE_MUSIC_SETTINGS,
+  normalizeSaleMusicSettings,
+  parseSaleMusicTimecode,
+  type SaleMusicPresetTone,
+  type SaleMusicSettings,
+} from '../../services/saleMusicSettings';
 
-type AudioSource = 'preset' | 'mp3' | 'youtube';
-type PresetTone = 'cash' | 'chime' | 'bell';
-
-interface MusicSettings {
-  source: AudioSource;
-  preset: PresetTone;
-  url: string;
-  durationSeconds: number;
-  volume: number;
-  youtubeStart: string;
-  youtubeEnd: string;
-}
+type MusicSettings = SaleMusicSettings;
+type PresetTone = SaleMusicPresetTone;
 
 interface SaleNotification {
   id: string;
@@ -24,16 +20,11 @@ interface SaleNotification {
 
 const SETTINGS_KEY = 'fluxozap:sale-music:settings';
 const PROCESSED_KEY = 'fluxozap:sale-music:processed-events';
-const DEFAULT_SETTINGS: MusicSettings = {
-  source: 'preset', preset: 'cash', url: '', durationSeconds: 30, volume: 80,
-  youtubeStart: '00:00', youtubeEnd: '00:30',
-};
-
-function readSettings(): MusicSettings {
+function readLocalSettings(): MusicSettings | null {
   try {
     const saved = JSON.parse(window.localStorage.getItem(SETTINGS_KEY) || 'null');
-    return saved ? { ...DEFAULT_SETTINGS, ...saved } : DEFAULT_SETTINGS;
-  } catch { return DEFAULT_SETTINGS; }
+    return saved ? normalizeSaleMusicSettings(saved) : null;
+  } catch { return null; }
 }
 
 function youtubeVideoId(value: string): string {
@@ -49,28 +40,11 @@ function youtubeVideoId(value: string): string {
   return '';
 }
 
-function parseTimecode(value: string): number | null {
-  const parts = value.trim().split(':');
-  if (parts.length < 1 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
-  const values = parts.map(Number);
-  if (parts.length > 1 && values.at(-1)! >= 60) return null;
-  if (parts.length === 3 && values[1] >= 60) return null;
-  if (parts.length === 1) return values[0];
-  if (parts.length === 2) return values[0] * 60 + values[1];
-  return values[0] * 3600 + values[1] * 60 + values[2];
-}
-
-function formatMoney(amount: number, currency: string): string {
-  try { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency }).format(amount); }
-  catch { return `${currency} ${amount.toFixed(2)}`; }
-}
-
 export const GlobalSaleMusicMonitor: React.FC = () => {
-  const [settings, setSettings] = useState<MusicSettings>(readSettings);
+  const [settings, setSettings] = useState<MusicSettings>(() => readLocalSettings() || DEFAULT_SALE_MUSIC_SETTINGS);
   const [enabled, setEnabled] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [youtubeReady, setYoutubeReady] = useState(false);
-  const [lastSale, setLastSale] = useState<SaleNotification | null>(null);
   const cursorRef = useRef('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -125,14 +99,17 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
       stopTimerRef.current = window.setTimeout(stopPlayback, settings.durationSeconds * 1000);
       return;
     }
-    const startAt = parseTimecode(settings.youtubeStart);
-    const endAt = parseTimecode(settings.youtubeEnd);
+    const startAt = parseSaleMusicTimecode(settings.youtubeStart);
+    const endAt = parseSaleMusicTimecode(settings.youtubeEnd);
     if (!youtubeId || !youtubeReady || startAt === null || endAt === null || endAt <= startAt) {
       throw new Error('Revise o link e o trecho do YouTube em /musica.');
     }
     youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [settings.volume] }), '*');
-    youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [startAt, true] }), '*');
-    youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+    youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({
+      event: 'command',
+      func: 'loadVideoById',
+      args: [{ videoId: youtubeId, startSeconds: startAt, endSeconds: endAt }],
+    }), '*');
     stopTimerRef.current = window.setTimeout(stopPlayback, (endAt - startAt) * 1000);
   };
 
@@ -158,7 +135,47 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
     }
   };
 
-  useEffect(() => { initializeMonitoring(); }, []);
+  const synchronizeGlobalSettings = async (): Promise<void> => {
+    const response = await fetch('/api/sale-music/config', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Não foi possível carregar a música global.');
+    let resolved: MusicSettings | null = payload.configured
+      ? normalizeSaleMusicSettings(payload.settings)
+      : null;
+    const localSettings = readLocalSettings();
+    if (!resolved && localSettings) {
+      const migrationResponse = await fetch('/api/sale-music/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: localSettings }),
+      });
+      const migrationPayload = await migrationResponse.json();
+      if (!migrationResponse.ok) throw new Error(migrationPayload.error || 'Não foi possível migrar a música salva.');
+      resolved = normalizeSaleMusicSettings(migrationPayload.settings);
+    }
+    const next = resolved || DEFAULT_SALE_MUSIC_SETTINGS;
+    setSettings((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    if (resolved) window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(resolved));
+  };
+
+  useEffect(() => {
+    let disposed = false;
+    const initialize = async () => {
+      try {
+        await synchronizeGlobalSettings();
+        if (!disposed) await initializeMonitoring();
+      } catch (error) {
+        console.error('[Alerta de vendas] Não foi possível iniciar o monitor global:', error);
+      }
+    };
+    initialize();
+    const settingsInterval = window.setInterval(() => {
+      synchronizeGlobalSettings().catch((error) => {
+        console.error('[Alerta de vendas] Não foi possível atualizar a música global:', error);
+      });
+    }, 15000);
+    return () => { disposed = true; window.clearInterval(settingsInterval); };
+  }, []);
 
   useEffect(() => {
     if (audioUnlocked) return;
@@ -188,14 +205,6 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
     };
   }, [audioUnlocked, settings, youtubeReady]);
 
-  useEffect(() => {
-    const syncSettings = (event: StorageEvent) => {
-      if (event.key === SETTINGS_KEY) setSettings(readSettings());
-    };
-    window.addEventListener('storage', syncSettings);
-    return () => window.removeEventListener('storage', syncSettings);
-  }, []);
-
   useEffect(() => setYoutubeReady(false), [youtubeId]);
 
   useEffect(() => {
@@ -223,7 +232,6 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
         const processed = processedEvents();
         const events: SaleNotification[] = (payload.events || []).filter((event: SaleNotification) => !processed.has(event.id));
         if (!events.length) return;
-        setLastSale(events.at(-1)!);
         try {
           await playConfiguredSound();
           rememberEvents(events.map((event) => event.id));
@@ -244,19 +252,11 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
 
   return (
     <>
-      {enabled && (
-        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs shadow-lg dark:border-emerald-800 dark:bg-slate-900">
-          <Music2 className="h-4 w-4 text-emerald-500" />
-          <div><p className="font-bold text-slate-800 dark:text-slate-100">{audioUnlocked ? 'Alertas sonoros ativos' : 'Monitor ativo · som libera no primeiro clique'}</p>{lastSale && <p className="text-slate-500">{formatMoney(lastSale.amount, lastSale.currency)} · {lastSale.accountName}</p>}</div>
-          <button type="button" onClick={() => { setEnabled(false); stopPlayback(); }} className="ml-1 text-slate-400 hover:text-slate-700" title="Desativar alertas"><X className="h-4 w-4" /></button>
-        </div>
-      )}
-
       {settings.source === 'youtube' && youtubeId && (
         <iframe
           ref={youtubeFrameRef}
           title="Player global do alerta de vendas"
-          src={`https://www.youtube.com/embed/${youtubeId}?enablejsapi=1&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
+          src={`https://www.youtube.com/embed/${youtubeId}?enablejsapi=1&playsinline=1&start=${parseSaleMusicTimecode(settings.youtubeStart) || 0}&end=${parseSaleMusicTimecode(settings.youtubeEnd) || 0}&origin=${encodeURIComponent(window.location.origin)}`}
           allow="autoplay"
           onLoad={() => setYoutubeReady(true)}
           className="pointer-events-none fixed h-px w-px opacity-0"
