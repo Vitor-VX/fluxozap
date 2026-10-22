@@ -18,6 +18,7 @@ import {
   parseSaleMusicTimecode,
   validateSaleMusicSettings,
 } from './src/services/saleMusicSettings';
+import { verifySaleNotificationTestSignature } from './src/services/saleNotificationTestAuth';
 import {
   buildPaymentBranchTargets,
   canStartFlowFromInboundMessage,
@@ -2738,15 +2739,25 @@ async function startServer() {
     method: payment.method,
   });
 
-  const sendSaleSocketMessage = (socket: SaleNotificationSocket, payload: unknown): void => {
-    if (socket.readyState !== WebSocket.OPEN) return;
-    try { socket.send(JSON.stringify(payload)); }
-    catch (error) { console.error('[Alertas de venda] Falha ao transmitir pelo WebSocket:', error); }
+  const sendSaleSocketMessage = (socket: SaleNotificationSocket, payload: unknown): boolean => {
+    if (socket.readyState !== WebSocket.OPEN) return false;
+    try {
+      socket.send(JSON.stringify(payload));
+      return true;
+    } catch (error) {
+      console.error('[Alertas de venda] Falha ao transmitir pelo WebSocket:', error);
+      return false;
+    }
   };
 
-  const broadcastSaleNotification = (payment: XPagPaymentRecord): void => {
-    const message = { type: 'sale_notification', event: serializeSaleNotification(payment) };
-    saleNotificationSockets.forEach((socket) => sendSaleSocketMessage(socket, message));
+  const broadcastSaleNotification = (payment: XPagPaymentRecord, eventId?: string): number => {
+    const event = serializeSaleNotification(payment);
+    const message = { type: 'sale_notification', event: eventId ? { ...event, id: eventId } : event };
+    let delivered = 0;
+    saleNotificationSockets.forEach((socket) => {
+      if (sendSaleSocketMessage(socket, message)) delivered += 1;
+    });
+    return delivered;
   };
 
   httpServer.on('upgrade', (request, socket, head) => {
@@ -3357,6 +3368,29 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ events: [], cursor: until.toISOString(), error: err.message || 'Não foi possível consultar novas vendas.' });
     }
+  });
+
+  app.post('/api/sale-notifications/test', (req: Request, res: Response) => {
+    const externalId = String(req.body?.externalId || '').trim();
+    const timestamp = String(req.headers['x-fluxozap-timestamp'] || '');
+    const signature = String(req.headers['x-fluxozap-signature'] || '');
+    if (!verifySaleNotificationTestSignature(xpagConfig.clientSecret, timestamp, externalId, signature)) {
+      return res.status(403).json({ success: false, error: 'Assinatura de teste inválida ou expirada.' });
+    }
+    const payment = xpagPayments.get(externalId);
+    if (!payment || payment.status !== 'confirmed') {
+      return res.status(404).json({ success: false, error: 'Venda confirmada não encontrada.' });
+    }
+    const eventId = `sale_test_${crypto.randomUUID()}`;
+    const deliveredConnections = broadcastSaleNotification(payment, eventId);
+    return res.json({
+      success: true,
+      eventId,
+      deliveredConnections,
+      message: deliveredConnections > 0
+        ? `Alerta de teste enviado para ${deliveredConnections} conexão(ões).`
+        : 'Nenhum navegador está conectado ao WebSocket neste momento.',
+    });
   });
 
   app.get('/api/sale-music/config', async (_req: Request, res: Response) => {
