@@ -79,7 +79,6 @@ export const MusicNotificationPage: React.FC = () => {
   const [lastSale, setLastSale] = useState<SaleNotification | null>(null);
   const [saved, setSaved] = useState(false);
   const [youtubeReady, setYoutubeReady] = useState(false);
-  const [showActivationPrompt, setShowActivationPrompt] = useState(true);
   const cursorRef = useRef('');
   const pollingRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -208,7 +207,6 @@ export const MusicNotificationPage: React.FC = () => {
       audioContextRef.current ||= new AudioContextCtor();
       await audioContextRef.current.resume();
       setEnabled(true);
-      setShowActivationPrompt(false);
       setStatus('Alertas ativos. Aguardando uma nova venda em qualquer linha.');
     } catch (error: any) {
       setStatus(error.message || 'Não foi possível ativar os alertas.');
@@ -318,17 +316,6 @@ export const MusicNotificationPage: React.FC = () => {
         )}
       </div>
 
-      {showActivationPrompt && !enabled && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/85 p-5 backdrop-blur-sm">
-          <section role="dialog" aria-modal="true" aria-labelledby="audio-permission-title" className="w-full max-w-md rounded-3xl border border-emerald-500/30 bg-slate-900 p-7 text-center shadow-2xl">
-            <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-400 text-slate-950"><Volume2 className="h-8 w-8" /></span>
-            <h2 id="audio-permission-title" className="mt-5 text-2xl font-bold">Permitir alertas sonoros?</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-400">Seu navegador exige um clique para liberar músicas e sons automáticos. Ative agora e mantenha esta página aberta para ouvir cada nova venda.</p>
-            <button type="button" onClick={enableAlerts} className="mt-6 w-full rounded-xl bg-emerald-400 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-300">Ativar som e monitoramento</button>
-            <button type="button" onClick={() => setShowActivationPrompt(false)} className="mt-2 w-full rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-300">Agora não</button>
-          </section>
-        </div>
-      )}
     </main>
   );
 };

@@ -26,6 +26,7 @@ import { R2StorageSettings } from './components/storage/R2StorageSettings';
 import { ApiSpendTracker } from './components/analytics/ApiSpendTracker';
 import { AccountHeaderSelector } from './components/accounts/AccountHeaderSelector';
 import { AccountManagerModal } from './components/accounts/AccountManagerModal';
+import { GlobalSaleMusicMonitor } from './components/music/GlobalSaleMusicMonitor';
 import { WhatsAppAccount } from './types/flow';
 import { DollarSign } from 'lucide-react';
 
@@ -390,6 +391,7 @@ export default function App() {
         onSelectAccount={(id) => setActiveAccountId(id)}
         onRefreshAccounts={fetchAccounts}
       />
+      <GlobalSaleMusicMonitor />
     </div>
   );
 }
