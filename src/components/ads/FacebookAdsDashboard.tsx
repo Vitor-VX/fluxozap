@@ -93,7 +93,8 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
     setError('');
     try {
       const page = append ? Number(salesData?.pagination?.nextPage || 1) : 1;
-      const response = await fetch(`/api/meta-capi/sales?accountId=${encodeURIComponent(accountId)}&page=${page}&limit=${PAGE_SIZE}`);
+      const params = new URLSearchParams({ accountId, datePreset, page: String(page), limit: String(PAGE_SIZE) });
+      const response = await fetch(`/api/meta-capi/sales?${params.toString()}`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Não foi possível carregar as vendas.');
       setSalesData((current: any) => append ? { ...payload, sales: [...(current?.sales || []), ...(payload.sales || [])] } : payload);
@@ -106,7 +107,7 @@ export const FacebookAdsDashboard: React.FC<Props> = ({ accountId, accountName, 
   useEffect(() => { setAds(null); loadCampaigns(false); }, [accountId, datePreset, campaignFilter]);
   useEffect(() => {
     if (tab === 'sales') { setSalesData(null); loadSales(false); }
-  }, [accountId, tab]);
+  }, [accountId, datePreset, tab]);
 
   useEffect(() => {
     try { window.localStorage.setItem(ADS_DATE_PRESET_KEY, datePreset); } catch { /* storage unavailable */ }

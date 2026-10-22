@@ -30,6 +30,8 @@ import { WhatsAppAccount } from './types/flow';
 import { DollarSign } from 'lucide-react';
 
 type ActiveTab = 'editor' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag' | 'capi' | 'ads';
+const ACTIVE_ACCOUNT_STORAGE_KEY = 'fluxozap:active-whatsapp-account';
+
 export interface ConversationTarget {
   accountId: string;
   phoneNumber: string;
@@ -54,7 +56,10 @@ export default function App() {
 
   // WhatsApp accounts state
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
-  const [activeAccountId, setActiveAccountId] = useState<string>('');
+  const [activeAccountId, setActiveAccountId] = useState<string>(() => {
+    try { return window.localStorage.getItem(ACTIVE_ACCOUNT_STORAGE_KEY) || ''; }
+    catch { return ''; }
+  });
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [conversationTarget, setConversationTarget] = useState<ConversationTarget | null>(null);
 
@@ -92,6 +97,12 @@ export default function App() {
   useEffect(() => {
     fetchAccounts();
   }, []);
+
+  useEffect(() => {
+    if (!activeAccountId) return;
+    try { window.localStorage.setItem(ACTIVE_ACCOUNT_STORAGE_KEY, activeAccountId); }
+    catch { /* storage unavailable */ }
+  }, [activeAccountId]);
 
   // Poll for error state and MongoDB connection state
   useEffect(() => {

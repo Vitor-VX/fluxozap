@@ -51,6 +51,8 @@ interface PendingMediaUpload {
   previewUrl?: string;
 }
 
+const CONVERSATIONS_PAGE_SIZE = 30;
+
 const BRASILIA_TIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo',
   hour: '2-digit',
@@ -93,12 +95,17 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   onConversationTargetHandled,
 }) => {
   const [sessions, setSessions] = useState<UserSession[]>([]);
+  const [sessionsPagination, setSessionsPagination] = useState({ total: 0, hasMore: false, nextOffset: 0 });
   const [selectedSession, setSelectedSession] = useState<UserSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMoreSessions, setIsLoadingMoreSessions] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'ads' | 'open_window' | 'paused'>('all');
   const [showCollectedVariables, setShowCollectedVariables] = useState(false);
   const activeAccountRef = useRef(activeAccountId);
+  const loadedSessionsLimitRef = useRef(CONVERSATIONS_PAGE_SIZE);
+  const contactListScrollRef = useRef<HTMLDivElement>(null);
+  const pendingContactScrollTopRef = useRef<number | null>(null);
 
   // Agent chat input state
   const [agentText, setAgentText] = useState('');
@@ -122,36 +129,70 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   const shouldStickToBottomRef = useRef(true);
   const selectedConversationRef = useRef('');
 
-  const fetchSessions = async (silent: boolean = false, accountId: string | undefined = activeAccountId) => {
+  const fetchSessions = async (
+    silent: boolean = false,
+    accountId: string | undefined = activeAccountId,
+    options: { append?: boolean; reset?: boolean } = {}
+  ) => {
     if (!silent) setIsLoading(true);
+    if (options.append) setIsLoadingMoreSessions(true);
     try {
       if (!accountId) {
         setSessions([]);
+        setSessionsPagination({ total: 0, hasMore: false, nextOffset: 0 });
         setSelectedSession(null);
         return;
       }
-      const res = await fetch(`/api/sessions?accountId=${encodeURIComponent(accountId)}`);
+      const append = options.append === true;
+      const offset = append ? sessions.length : 0;
+      const limit = append
+        ? CONVERSATIONS_PAGE_SIZE
+        : options.reset
+          ? CONVERSATIONS_PAGE_SIZE
+          : Math.max(CONVERSATIONS_PAGE_SIZE, loadedSessionsLimitRef.current);
+      pendingContactScrollTopRef.current = options.reset ? 0 : (contactListScrollRef.current?.scrollTop ?? 0);
+      const params = new URLSearchParams({ accountId, offset: String(offset), limit: String(limit) });
+      const res = await fetch(`/api/sessions?${params.toString()}`);
       if (res.ok) {
-        const data: UserSession[] = await res.json();
+        const payload: { sessions: UserSession[]; pagination: { total: number; hasMore: boolean; nextOffset: number } } = await res.json();
         if (activeAccountRef.current !== accountId) return;
-        setSessions(data);
+        const data = payload.sessions || [];
+        const nextSessions = append
+          ? Array.from(new Map([...sessions, ...data].map((session) => [`${session.accountId}:${session.phoneNumber}`, session])).values())
+          : data;
+        loadedSessionsLimitRef.current = Math.max(CONVERSATIONS_PAGE_SIZE, nextSessions.length);
+        setSessions(nextSessions);
+        setSessionsPagination(payload.pagination || { total: nextSessions.length, hasMore: false, nextOffset: nextSessions.length });
 
         // Never carry a chat from one WhatsApp line into another line's context.
         setSelectedSession((prev) => {
           if (!prev || prev.accountId !== accountId) return null;
-          return data.find((s) => s.phoneNumber === prev.phoneNumber && s.accountId === accountId) || null;
+          return nextSessions.find((s) => s.phoneNumber === prev.phoneNumber && s.accountId === accountId) || prev;
         });
       }
     } catch (err) {
       console.error('Error fetching sessions:', err);
     } finally {
       if (!silent) setIsLoading(false);
+      if (options.append) setIsLoadingMoreSessions(false);
     }
   };
 
   useEffect(() => {
+    if (pendingContactScrollTopRef.current === null) return;
+    const scrollTop = pendingContactScrollTopRef.current;
+    pendingContactScrollTopRef.current = null;
+    requestAnimationFrame(() => {
+      if (contactListScrollRef.current) contactListScrollRef.current.scrollTop = scrollTop;
+    });
+  }, [sessions]);
+
+  useEffect(() => {
     activeAccountRef.current = activeAccountId;
+    loadedSessionsLimitRef.current = CONVERSATIONS_PAGE_SIZE;
+    pendingContactScrollTopRef.current = 0;
     setSessions([]);
+    setSessionsPagination({ total: 0, hasMore: false, nextOffset: 0 });
     setSelectedSession(null);
     setShowCollectedVariables(false);
     setAgentText('');
@@ -163,7 +204,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     setAgentCaption('');
     setSendError(null);
     setReplyingTo(null);
-    fetchSessions(false, activeAccountId);
+    fetchSessions(false, activeAccountId, { reset: true });
     const interval = setInterval(() => fetchSessions(true, activeAccountId), 4000);
     return () => clearInterval(interval);
   }, [activeAccountId]);
@@ -469,7 +510,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
             <div>
               <h3 className="text-sm font-bold text-slate-900">Conversas &amp; Leads</h3>
               <p className="text-[11px] text-slate-500">
-                {sessions.length} {sessions.length === 1 ? 'conversa registrada' : 'conversas registradas'}
+                {sessions.length} de {sessionsPagination.total} {sessionsPagination.total === 1 ? 'conversa registrada' : 'conversas registradas'}
               </p>
             </div>
             <div className="flex items-center gap-1">
@@ -582,7 +623,10 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
         </div>
 
         {/* Sessions List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+        <div
+          ref={contactListScrollRef}
+          className="flex-1 overflow-y-auto divide-y divide-slate-100 [overflow-anchor:none]"
+        >
           {filteredSessions.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -592,7 +636,8 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
               </p>
             </div>
           ) : (
-            filteredSessions.map((item) => {
+            <>
+            {filteredSessions.map((item) => {
               const isSelected = selectedSession?.phoneNumber === item.phoneNumber && selectedSession?.accountId === item.accountId;
               const contactName = item.variables?.nome || item.name || item.phoneNumber;
               const lastMsg = item.history[item.history.length - 1];
@@ -678,7 +723,20 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                   </div>
                 </button>
               );
-            })
+            })}
+            </>
+          )}
+          {sessionsPagination.hasMore && (
+            <div className="p-3">
+              <button
+                type="button"
+                onClick={() => fetchSessions(true, activeAccountId, { append: true })}
+                disabled={isLoadingMoreSessions}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {isLoadingMoreSessions ? 'Carregando...' : 'Carregar mais conversas'}
+              </button>
+            </div>
           )}
         </div>
       </div>

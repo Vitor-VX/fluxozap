@@ -3076,10 +3076,46 @@ async function startServer() {
   app.get('/api/meta-capi/sales', (req: Request, res: Response) => {
     const accountId = String(req.query.accountId || '');
     const config = metaCapiConfigs[accountId];
+    const allowedPresets = new Set(['today', 'yesterday', 'last_7d', 'last_14d', 'last_30d', 'this_month', 'last_month', 'maximum']);
+    const datePreset = allowedPresets.has(String(req.query.datePreset)) ? String(req.query.datePreset) : 'last_30d';
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const brasiliaNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    const brasiliaBoundary = (year: number, month: number, day: number) => new Date(Date.UTC(year, month, day, 3, 0, 0, 0));
+    const startOfToday = brasiliaBoundary(brasiliaNow.getFullYear(), brasiliaNow.getMonth(), brasiliaNow.getDate());
+    let periodStart: Date | null = null;
+    let periodEnd: Date | null = null;
+    if (datePreset === 'today') {
+      periodStart = startOfToday;
+      periodEnd = new Date(startOfToday.getTime() + 86400000);
+    } else if (datePreset === 'yesterday') {
+      periodStart = new Date(startOfToday.getTime() - 86400000);
+      periodEnd = startOfToday;
+    } else if (['last_7d', 'last_14d', 'last_30d'].includes(datePreset)) {
+      const days = Number(datePreset.match(/\d+/)?.[0] || 30);
+      periodStart = new Date(startOfToday.getTime() - (days - 1) * 86400000);
+      periodEnd = new Date(startOfToday.getTime() + 86400000);
+    } else if (datePreset === 'this_month') {
+      periodStart = brasiliaBoundary(brasiliaNow.getFullYear(), brasiliaNow.getMonth(), 1);
+      periodEnd = brasiliaBoundary(brasiliaNow.getFullYear(), brasiliaNow.getMonth() + 1, 1);
+    } else if (datePreset === 'last_month') {
+      periodStart = brasiliaBoundary(brasiliaNow.getFullYear(), brasiliaNow.getMonth() - 1, 1);
+      periodEnd = brasiliaBoundary(brasiliaNow.getFullYear(), brasiliaNow.getMonth(), 1);
+    }
+    const paymentDate = (payment: XPagPaymentRecord) => {
+      const value = payment.status === 'confirmed'
+        ? (payment.paidAt || payment.metaConversionSentAt || payment.updatedAt)
+        : (payment.createdAt || payment.updatedAt);
+      const timestamp = new Date(value).getTime();
+      return Number.isFinite(timestamp) ? timestamp : 0;
+    };
     const allPayments = Array.from(xpagPayments.values())
       .filter((payment) => !accountId || payment.accountId === accountId)
+      .filter((payment) => {
+        if (!periodStart || !periodEnd) return true;
+        const timestamp = paymentDate(payment);
+        return timestamp >= periodStart.getTime() && timestamp < periodEnd.getTime();
+      })
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const serializePayment = (payment: XPagPaymentRecord) => {
         const session = sessions.get(sessionStorageKey(payment.accountId, payment.sessionPhoneNumber));
@@ -3134,7 +3170,7 @@ async function startServer() {
       (config?.datasetId && config?.accessToken)
     );
     res.json({
-      configured: Boolean(config?.enabled && hasConversionDestination), summary, sales,
+      configured: Boolean(config?.enabled && hasConversionDestination), datePreset, summary, sales,
       pagination: { page, limit, total: allPayments.length, hasMore, nextPage: hasMore ? page + 1 : null },
     });
   });
@@ -4786,7 +4822,7 @@ async function startServer() {
     res.json({ success: true, message: 'Limpeza de conversas expiradas concluída.' });
   });
 
-  // API: Get all active sessions / contacts (with live window state and optional accountId filter)
+  // API: Get active sessions / contacts with optional server-side pagination.
   app.get('/api/sessions', (req: Request, res: Response) => {
     const accountId = req.query.accountId as string;
     let list = Array.from(sessions.values())
@@ -4797,7 +4833,22 @@ async function startServer() {
       list = list.filter((s) => s.accountId === accountId);
     }
     list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    res.json(list);
+    const paginationRequested = req.query.limit !== undefined || req.query.offset !== undefined;
+    if (!paginationRequested) return res.json(list);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+    const pageItems = list.slice(offset, offset + limit);
+    const nextOffset = offset + pageItems.length;
+    res.json({
+      sessions: pageItems,
+      pagination: {
+        offset,
+        limit,
+        total: list.length,
+        hasMore: nextOffset < list.length,
+        nextOffset,
+      },
+    });
   });
 
   // Vite middleware in dev or static files in production
