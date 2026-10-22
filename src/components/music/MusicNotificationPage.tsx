@@ -10,6 +10,8 @@ interface MusicSettings {
   url: string;
   durationSeconds: number;
   volume: number;
+  youtubeStart: string;
+  youtubeEnd: string;
 }
 
 interface SaleNotification {
@@ -23,7 +25,15 @@ interface SaleNotification {
 
 const SETTINGS_KEY = 'fluxozap:sale-music:settings';
 const PROCESSED_KEY = 'fluxozap:sale-music:processed-events';
-const DEFAULT_SETTINGS: MusicSettings = { source: 'preset', preset: 'cash', url: '', durationSeconds: 30, volume: 80 };
+const DEFAULT_SETTINGS: MusicSettings = {
+  source: 'preset',
+  preset: 'cash',
+  url: '',
+  durationSeconds: 30,
+  volume: 80,
+  youtubeStart: '00:00',
+  youtubeEnd: '00:30',
+};
 
 function loadSettings(): MusicSettings {
   try {
@@ -45,6 +55,18 @@ function youtubeVideoId(value: string): string {
   return '';
 }
 
+function parseTimecode(value: string): number | null {
+  const parts = value.trim().split(':');
+  if (parts.length < 1 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
+  const numbers = parts.map(Number);
+  if (numbers.some((part) => !Number.isFinite(part))) return null;
+  if (parts.length > 1 && numbers.at(-1)! >= 60) return null;
+  if (parts.length === 3 && numbers[1] >= 60) return null;
+  if (parts.length === 1) return numbers[0];
+  if (parts.length === 2) return numbers[0] * 60 + numbers[1];
+  return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
+}
+
 function money(amount: number, currency: string): string {
   try { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency }).format(amount); }
   catch { return `${currency} ${amount.toFixed(2)}`; }
@@ -57,6 +79,7 @@ export const MusicNotificationPage: React.FC = () => {
   const [lastSale, setLastSale] = useState<SaleNotification | null>(null);
   const [saved, setSaved] = useState(false);
   const [youtubeReady, setYoutubeReady] = useState(false);
+  const [showActivationPrompt, setShowActivationPrompt] = useState(true);
   const cursorRef = useRef('');
   const pollingRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -107,8 +130,15 @@ export const MusicNotificationPage: React.FC = () => {
     if (settings.source === 'youtube') {
       if (!youtubeId) throw new Error('Informe uma URL válida do YouTube.');
       if (!youtubeReady) throw new Error('O player do YouTube ainda está carregando. Tente novamente em instantes.');
+      const startAt = parseTimecode(settings.youtubeStart);
+      const endAt = parseTimecode(settings.youtubeEnd);
+      if (startAt === null || endAt === null) throw new Error('Use um horário válido, como 1:10 ou 01:30.');
+      if (endAt <= startAt) throw new Error('O final do trecho precisa ser posterior ao início.');
       youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [settings.volume] }), '*');
+      youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [startAt, true] }), '*');
       youtubeFrameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+      stopTimerRef.current = window.setTimeout(stopPlayback, (endAt - startAt) * 1000);
+      return;
     } else {
       const audio = new Audio(settings.url.trim());
       audio.volume = settings.volume / 100;
@@ -119,6 +149,14 @@ export const MusicNotificationPage: React.FC = () => {
   };
 
   const saveSettings = () => {
+    if (settings.source === 'youtube') {
+      const startAt = parseTimecode(settings.youtubeStart);
+      const endAt = parseTimecode(settings.youtubeEnd);
+      if (startAt === null || endAt === null || endAt <= startAt) {
+        setStatus('Revise o início e o fim do trecho do YouTube. Exemplo: 1:10 até 1:30.');
+        return;
+      }
+    }
     const normalized = {
       ...settings,
       durationSeconds: Math.min(300, Math.max(1, Number(settings.durationSeconds) || 30)),
@@ -170,6 +208,7 @@ export const MusicNotificationPage: React.FC = () => {
       audioContextRef.current ||= new AudioContextCtor();
       await audioContextRef.current.resume();
       setEnabled(true);
+      setShowActivationPrompt(false);
       setStatus('Alertas ativos. Aguardando uma nova venda em qualquer linha.');
     } catch (error: any) {
       setStatus(error.message || 'Não foi possível ativar os alertas.');
@@ -236,10 +275,23 @@ export const MusicNotificationPage: React.FC = () => {
             </label>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="text-sm font-semibold text-slate-300">Duração máxima
+          {settings.source === 'youtube' && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-semibold text-slate-300">Começar em
+                <input type="text" inputMode="numeric" value={settings.youtubeStart} onChange={(event) => setSettings((current) => ({ ...current, youtubeStart: event.target.value }))} placeholder="1:10" className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-slate-100 outline-none focus:border-emerald-400" />
+                <span className="mt-1 block text-xs font-normal text-slate-500">Aceita MM:SS ou HH:MM:SS.</span>
+              </label>
+              <label className="text-sm font-semibold text-slate-300">Terminar em
+                <input type="text" inputMode="numeric" value={settings.youtubeEnd} onChange={(event) => setSettings((current) => ({ ...current, youtubeEnd: event.target.value }))} placeholder="1:30" className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-slate-100 outline-none focus:border-emerald-400" />
+                <span className="mt-1 block text-xs font-normal text-slate-500">O player para automaticamente neste ponto.</span>
+              </label>
+            </div>
+          )}
+
+          <div className={`grid gap-4 ${settings.source === 'youtube' ? '' : 'sm:grid-cols-2'}`}>
+            {settings.source !== 'youtube' && <label className="text-sm font-semibold text-slate-300">Duração máxima
               <div className="mt-2 flex items-center gap-2"><input type="number" min={1} max={300} value={settings.durationSeconds} onChange={(event) => setSettings((current) => ({ ...current, durationSeconds: Number(event.target.value) }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-emerald-400" /><span className="text-slate-500">segundos</span></div>
-            </label>
+            </label>}
             <label className="text-sm font-semibold text-slate-300">Volume: {settings.volume}%
               <div className="mt-2 flex h-[46px] items-center gap-3 rounded-xl border border-slate-700 bg-slate-950 px-4"><Volume2 className="h-4 w-4 text-slate-500" /><input type="range" min={0} max={100} value={settings.volume} onChange={(event) => setSettings((current) => ({ ...current, volume: Number(event.target.value) }))} className="w-full accent-emerald-400" /></div>
             </label>
@@ -265,6 +317,18 @@ export const MusicNotificationPage: React.FC = () => {
           />
         )}
       </div>
+
+      {showActivationPrompt && !enabled && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/85 p-5 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-labelledby="audio-permission-title" className="w-full max-w-md rounded-3xl border border-emerald-500/30 bg-slate-900 p-7 text-center shadow-2xl">
+            <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-400 text-slate-950"><Volume2 className="h-8 w-8" /></span>
+            <h2 id="audio-permission-title" className="mt-5 text-2xl font-bold">Permitir alertas sonoros?</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-400">Seu navegador exige um clique para liberar músicas e sons automáticos. Ative agora e mantenha esta página aberta para ouvir cada nova venda.</p>
+            <button type="button" onClick={enableAlerts} className="mt-6 w-full rounded-xl bg-emerald-400 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-300">Ativar som e monitoramento</button>
+            <button type="button" onClick={() => setShowActivationPrompt(false)} className="mt-2 w-full rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-300">Agora não</button>
+          </section>
+        </div>
+      )}
     </main>
   );
 };
