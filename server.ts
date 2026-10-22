@@ -510,6 +510,7 @@ interface XPagPaymentRecord {
   e2e?: string;
   expiresAt?: string;
   paidAt?: string;
+  saleConfirmedAt?: string;
   method: XPagPaymentMethod;
   amount: number;
   currency: XPagCurrency;
@@ -3175,6 +3176,33 @@ async function startServer() {
     });
   });
 
+  app.get('/api/sale-notifications', async (req: Request, res: Response) => {
+    const until = new Date();
+    const afterValue = String(req.query.after || '');
+    const after = new Date(afterValue);
+    if (!afterValue || Number.isNaN(after.getTime())) {
+      return res.json({ events: [], cursor: until.toISOString() });
+    }
+    try {
+      const payments = await mongoService.getConfirmedSalesForNotifications(
+        after.toISOString(),
+        until.toISOString()
+      );
+      const events = payments.map((payment: XPagPaymentRecord) => ({
+        id: payment.externalId,
+        confirmedAt: payment.saleConfirmedAt,
+        accountId: payment.accountId,
+        accountName: whatsappAccounts.find((account) => account.id === payment.accountId)?.name || 'Linha do WhatsApp',
+        amount: payment.amount,
+        currency: payment.currency,
+        method: payment.method,
+      }));
+      res.json({ events, cursor: until.toISOString() });
+    } catch (err: any) {
+      res.status(500).json({ events: [], cursor: until.toISOString(), error: err.message || 'Não foi possível consultar novas vendas.' });
+    }
+  });
+
   app.post('/api/meta-capi/sales/:externalId/retry', async (req: Request, res: Response) => {
     const accountId = String(req.body?.accountId || '');
     const payment = xpagPayments.get(String(req.params.externalId));
@@ -3913,6 +3941,7 @@ async function startServer() {
       if (verifiedE2e) record.receivedE2es.push(verifiedE2e);
       const confirmedAt = new Date().toISOString();
       record.paidAt = normalizeXPagDate(firstXPagValue(verificationData.paid_at, verificationData.confirmed_at)) || confirmedAt;
+      record.saleConfirmedAt = confirmedAt;
       record.response = { ...record.response, verification, webhook: event };
       record.updatedAt = confirmedAt;
       const conversionKey = getMetaConversionKey(record);

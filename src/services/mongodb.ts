@@ -404,10 +404,29 @@ class MongoService {
     if (!this.isConnected() || !data?.externalId) return false;
     await XPagPaymentModel.updateOne(
       { externalId: data.externalId },
-      { $set: { webhookKeyHash: data.webhookKeyHash, sessionPhoneNumber: data.sessionPhoneNumber, status: data.status, data } },
+      { $set: {
+        webhookKeyHash: data.webhookKeyHash,
+        sessionPhoneNumber: data.sessionPhoneNumber,
+        accountId: data.accountId,
+        status: data.status,
+        confirmedAt: data.saleConfirmedAt ? new Date(data.saleConfirmedAt) : undefined,
+        data,
+      } },
       { upsert: true }
     );
     return true;
+  }
+
+  public async getConfirmedSalesForNotifications(afterIso: string, untilIso: string, limit = 500): Promise<any[]> {
+    if (!this.isConnected()) return [];
+    const rows = await XPagPaymentModel.find({
+      status: 'confirmed',
+      confirmedAt: { $gt: new Date(afterIso), $lte: new Date(untilIso) },
+    })
+      .sort({ confirmedAt: 1, _id: 1 })
+      .limit(Math.min(500, Math.max(1, limit)))
+      .lean();
+    return rows.map((row: any) => row.data).filter(Boolean);
   }
 
   public async getXPagPaymentByWebhookKeyHash(webhookKeyHash: string): Promise<any | null> {

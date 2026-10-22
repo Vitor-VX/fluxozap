@@ -68,7 +68,9 @@ const XPagPaymentSchema = new Schema(
     externalId: { type: String, required: true, unique: true, index: true },
     webhookKeyHash: { type: String, sparse: true, unique: true },
     sessionPhoneNumber: { type: String, index: true },
+    accountId: { type: String, index: true },
     status: { type: String, index: true },
+    confirmedAt: { type: Date, index: true },
     data: { type: Schema.Types.Mixed, required: true },
   },
   { ...options, collection: 'xpag_payments' }
