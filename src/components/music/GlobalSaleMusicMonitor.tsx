@@ -20,11 +20,19 @@ interface SaleNotification {
 
 const SETTINGS_KEY = 'fluxozap:sale-music:settings';
 const PROCESSED_KEY = 'fluxozap:sale-music:processed-events';
+const PENDING_KEY = 'fluxozap:sale-music:pending-events';
 function readLocalSettings(): MusicSettings | null {
   try {
     const saved = JSON.parse(window.localStorage.getItem(SETTINGS_KEY) || 'null');
     return saved ? normalizeSaleMusicSettings(saved) : null;
   } catch { return null; }
+}
+
+function readPendingEvents(): SaleNotification[] {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(PENDING_KEY) || '[]');
+    return Array.isArray(saved) ? saved.slice(-50) : [];
+  } catch { return []; }
 }
 
 function youtubeVideoId(value: string): string {
@@ -50,7 +58,8 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null);
   const stopTimerRef = useRef<number | null>(null);
-  const pendingEventsRef = useRef<SaleNotification[]>([]);
+  const pendingEventsRef = useRef<SaleNotification[]>(readPendingEvents());
+  const playbackAttemptRef = useRef(false);
   const youtubeId = useMemo(() => youtubeVideoId(settings.url), [settings.url]);
 
   const stopPlayback = () => {
@@ -92,9 +101,14 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
     if (settings.source === 'preset') return playPreset();
     if (settings.source === 'mp3') {
       if (!settings.url.trim()) throw new Error('Configure uma URL de MP3 em /musica.');
-      const audio = new Audio(settings.url.trim());
+      const sourceUrl = settings.url.trim();
+      const audio = audioRef.current?.src === new URL(sourceUrl, window.location.href).href
+        ? audioRef.current
+        : new Audio(sourceUrl);
+      audio.preload = 'auto';
       audio.volume = settings.volume / 100;
       audioRef.current = audio;
+      audio.currentTime = 0;
       await audio.play();
       stopTimerRef.current = window.setTimeout(stopPlayback, settings.durationSeconds * 1000);
       return;
@@ -121,6 +135,38 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
   const rememberEvents = (ids: string[]) => {
     const values = Array.from(new Set([...processedEvents(), ...ids])).slice(-200);
     window.localStorage.setItem(PROCESSED_KEY, JSON.stringify(values));
+  };
+
+  const persistPendingEvents = () => {
+    window.localStorage.setItem(PENDING_KEY, JSON.stringify(pendingEventsRef.current.slice(-50)));
+  };
+
+  const playPendingEvents = async (): Promise<void> => {
+    if (!audioUnlocked || playbackAttemptRef.current || !pendingEventsRef.current.length) return;
+    playbackAttemptRef.current = true;
+    try {
+      await playConfiguredSound();
+      const completed = [...pendingEventsRef.current];
+      rememberEvents(completed.map((event) => event.id));
+      pendingEventsRef.current = [];
+      persistPendingEvents();
+    } catch (error) {
+      persistPendingEvents();
+      throw error;
+    } finally {
+      playbackAttemptRef.current = false;
+    }
+  };
+
+  const receiveEvents = async (incoming: SaleNotification[]): Promise<void> => {
+    const processed = processedEvents();
+    const queued = new Set(pendingEventsRef.current.map((event) => event.id));
+    const fresh = incoming.filter((event) => event?.id && !processed.has(event.id) && !queued.has(event.id));
+    if (fresh.length) {
+      pendingEventsRef.current = [...pendingEventsRef.current, ...fresh].slice(-50);
+      persistPendingEvents();
+    }
+    await playPendingEvents();
   };
 
   const initializeMonitoring = async () => {
@@ -184,13 +230,18 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
         const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
         audioContextRef.current ||= new AudioContextCtor();
         await audioContextRef.current.resume();
-        setAudioUnlocked(true);
-        const pending = pendingEventsRef.current;
-        if (pending.length) {
-          await playConfiguredSound();
-          rememberEvents(pending.map((event) => event.id));
-          pendingEventsRef.current = [];
+        if (settings.source === 'mp3' && settings.url.trim()) {
+          const audio = audioRef.current || new Audio(settings.url.trim());
+          audio.preload = 'auto';
+          audio.volume = settings.volume / 100;
+          audio.muted = true;
+          await audio.play();
+          audio.pause();
+          audio.currentTime = 0;
+          audio.muted = false;
+          audioRef.current = audio;
         }
+        setAudioUnlocked(true);
       } catch (error) {
         console.error('[Alerta de vendas] O navegador ainda não liberou o áudio:', error);
       }
@@ -208,19 +259,18 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
   useEffect(() => setYoutubeReady(false), [youtubeId]);
 
   useEffect(() => {
-    if (!audioUnlocked || !youtubeReady || !pendingEventsRef.current.length) return;
-    const pending = [...pendingEventsRef.current];
-    playConfiguredSound()
-      .then(() => {
-        rememberEvents(pending.map((event) => event.id));
-        pendingEventsRef.current = [];
-      })
+    if (!audioUnlocked || (settings.source === 'youtube' && !youtubeReady)) return;
+    playPendingEvents()
       .catch((error) => console.error('[Alerta de vendas] Falha ao reproduzir evento pendente:', error));
   }, [audioUnlocked, youtubeReady, settings]);
 
   useEffect(() => {
     if (!enabled) return;
     let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+
     const poll = async () => {
       if (!cursorRef.current) return;
       try {
@@ -229,24 +279,73 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
         if (!response.ok) throw new Error(payload.error || 'Falha ao consultar vendas.');
         if (disposed) return;
         cursorRef.current = payload.cursor;
-        const processed = processedEvents();
-        const events: SaleNotification[] = (payload.events || []).filter((event: SaleNotification) => !processed.has(event.id));
-        if (!events.length) return;
-        try {
-          await playConfiguredSound();
-          rememberEvents(events.map((event) => event.id));
-          pendingEventsRef.current = [];
-        } catch (error) {
-          pendingEventsRef.current = events;
-          throw error;
-        }
+        await receiveEvents(payload.events || []);
       } catch (error) {
         console.error('[Alerta de vendas]', error);
       }
     };
-    const interval = window.setInterval(poll, 4000);
-    return () => { disposed = true; window.clearInterval(interval); };
-  }, [enabled, settings, youtubeReady]);
+
+    const connect = () => {
+      if (disposed || !cursorRef.current) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${window.location.host}/ws/sale-notifications`);
+      socket.addEventListener('open', () => {
+        reconnectAttempt = 0;
+        socket?.send(JSON.stringify({ type: 'subscribe', after: cursorRef.current }));
+      });
+      socket.addEventListener('message', (message) => {
+        try {
+          const payload = JSON.parse(String(message.data || '{}'));
+          if (payload.cursor) cursorRef.current = payload.cursor;
+          const events = payload.type === 'sale_notification'
+            ? [payload.event]
+            : payload.type === 'sale_notifications' ? payload.events || [] : [];
+          if (events.length) receiveEvents(events).catch((error) => console.error('[Alerta de vendas]', error));
+        } catch (error) {
+          console.error('[Alerta de vendas] Mensagem WebSocket inválida:', error);
+        }
+      });
+      socket.addEventListener('close', () => {
+        if (disposed) return;
+        const delay = Math.min(15_000, 1_000 * 2 ** reconnectAttempt++);
+        reconnectTimer = window.setTimeout(connect, delay);
+      });
+      socket.addEventListener('error', () => socket?.close());
+    };
+
+    const recover = () => {
+      if (document.visibilityState === 'visible') poll();
+    };
+    connect();
+    const fallbackInterval = window.setInterval(() => {
+      if (socket?.readyState !== WebSocket.OPEN) poll();
+    }, 4_000);
+    window.addEventListener('focus', poll);
+    window.addEventListener('online', poll);
+    document.addEventListener('visibilitychange', recover);
+    return () => {
+      disposed = true;
+      socket?.close();
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      window.clearInterval(fallbackInterval);
+      window.removeEventListener('focus', poll);
+      window.removeEventListener('online', poll);
+      document.removeEventListener('visibilitychange', recover);
+    };
+  }, [enabled, settings, youtubeReady, audioUnlocked]);
+
+  useEffect(() => {
+    if (settings.source !== 'mp3' || !settings.url.trim()) return;
+    const audio = new Audio(settings.url.trim());
+    audio.preload = 'auto';
+    audio.volume = settings.volume / 100;
+    audio.load();
+    audioRef.current = audio;
+    return () => {
+      if (audioRef.current === audio) audioRef.current = null;
+      audio.pause();
+    };
+  }, [settings.source, settings.url, settings.volume]);
 
   useEffect(() => () => stopPlayback(), []);
 

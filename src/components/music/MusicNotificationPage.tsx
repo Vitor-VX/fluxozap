@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BellRing, CheckCircle2, ExternalLink, Music2, Play, Radio, Save, Square, Volume2 } from 'lucide-react';
+import { BellRing, CheckCircle2, ExternalLink, Music2, Play, Radio, Save, Square, UploadCloud, Volume2 } from 'lucide-react';
 import {
   DEFAULT_SALE_MUSIC_SETTINGS,
   normalizeSaleMusicSettings,
@@ -54,6 +54,7 @@ export const MusicNotificationPage: React.FC = () => {
   const [status, setStatus] = useState('Carregando configuração global...');
   const [lastSale, setLastSale] = useState<SaleNotification | null>(null);
   const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [youtubeReady, setYoutubeReady] = useState(false);
   const cursorRef = useRef('');
   const pollingRef = useRef<number | null>(null);
@@ -118,9 +119,14 @@ export const MusicNotificationPage: React.FC = () => {
       stopTimerRef.current = window.setTimeout(stopPlayback, (endAt - startAt) * 1000);
       return;
     } else {
-      const audio = new Audio(settings.url.trim());
+      const sourceUrl = settings.url.trim();
+      const audio = audioRef.current?.src === new URL(sourceUrl, window.location.href).href
+        ? audioRef.current
+        : new Audio(sourceUrl);
+      audio.preload = 'auto';
       audio.volume = settings.volume / 100;
       audioRef.current = audio;
+      audio.currentTime = 0;
       await audio.play();
     }
     stopTimerRef.current = window.setTimeout(stopPlayback, settings.durationSeconds * 1000);
@@ -154,6 +160,38 @@ export const MusicNotificationPage: React.FC = () => {
     }
   };
 
+  const uploadMp3 = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.mp3')) {
+      setStatus('Selecione um arquivo no formato MP3.');
+      return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      setStatus('O MP3 excede o limite máximo de 100 MB.');
+      return;
+    }
+    setUploading(true);
+    setStatus('Enviando o MP3 para o Cloudflare R2...');
+    try {
+      const response = await fetch('/api/sale-music/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'X-File-Name': encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Não foi possível enviar o MP3.');
+      setSettings((current) => ({ ...current, source: 'mp3', url: payload.url }));
+      setStatus('MP3 salvo no R2. Agora clique em “Salvar configuração” para torná-lo global.');
+    } catch (error: any) {
+      setStatus(error.message || 'Não foi possível enviar o MP3 para o R2.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const getProcessed = (): Set<string> => {
     try { return new Set(JSON.parse(window.localStorage.getItem(PROCESSED_KEY) || '[]')); }
     catch { return new Set(); }
@@ -164,6 +202,17 @@ export const MusicNotificationPage: React.FC = () => {
     window.localStorage.setItem(PROCESSED_KEY, JSON.stringify(values));
   };
 
+  const announceSales = async (incoming: SaleNotification[]) => {
+    const processed = getProcessed();
+    const events = incoming.filter((event) => event?.id && !processed.has(event.id));
+    if (events.length === 0) return;
+    const latest = events.at(-1)!;
+    setLastSale(latest);
+    setStatus(`${events.length === 1 ? 'Nova venda confirmada' : `${events.length} novas vendas confirmadas`}!`);
+    await playConfiguredSound();
+    rememberProcessed(events.map((event) => event.id));
+  };
+
   const pollSales = async () => {
     if (!cursorRef.current) return;
     try {
@@ -171,14 +220,7 @@ export const MusicNotificationPage: React.FC = () => {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Falha ao consultar vendas.');
       cursorRef.current = payload.cursor;
-      const processed = getProcessed();
-      const events: SaleNotification[] = (payload.events || []).filter((event: SaleNotification) => !processed.has(event.id));
-      if (events.length === 0) return;
-      rememberProcessed(events.map((event) => event.id));
-      const latest = events.at(-1)!;
-      setLastSale(latest);
-      setStatus(`${events.length === 1 ? 'Nova venda confirmada' : `${events.length} novas vendas confirmadas`}!`);
-      await playConfiguredSound();
+      await announceSales(payload.events || []);
     } catch (error: any) {
       setStatus(error.message || 'Não foi possível consultar novas vendas.');
     }
@@ -236,14 +278,71 @@ export const MusicNotificationPage: React.FC = () => {
 
   useEffect(() => {
     if (!enabled) return;
-    pollingRef.current = window.setInterval(pollSales, 4000);
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+    const connect = () => {
+      if (disposed || !cursorRef.current) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${window.location.host}/ws/sale-notifications`);
+      socket.addEventListener('open', () => {
+        reconnectAttempt = 0;
+        socket?.send(JSON.stringify({ type: 'subscribe', after: cursorRef.current }));
+      });
+      socket.addEventListener('message', (message) => {
+        try {
+          const payload = JSON.parse(String(message.data || '{}'));
+          if (payload.cursor) cursorRef.current = payload.cursor;
+          const events = payload.type === 'sale_notification'
+            ? [payload.event]
+            : payload.type === 'sale_notifications' ? payload.events || [] : [];
+          if (events.length) announceSales(events).catch((error) => setStatus(error.message || 'Não foi possível tocar o alerta.'));
+        } catch { /* ignore malformed socket messages */ }
+      });
+      socket.addEventListener('close', () => {
+        if (disposed) return;
+        const delay = Math.min(15_000, 1_000 * 2 ** reconnectAttempt++);
+        reconnectTimer = window.setTimeout(connect, delay);
+      });
+      socket.addEventListener('error', () => socket?.close());
+    };
+    connect();
+    pollingRef.current = window.setInterval(() => {
+      if (socket?.readyState !== WebSocket.OPEN) pollSales();
+    }, 4000);
+    const recover = () => {
+      if (document.visibilityState === 'visible') pollSales();
+    };
+    window.addEventListener('focus', pollSales);
+    window.addEventListener('online', pollSales);
+    document.addEventListener('visibilitychange', recover);
     return () => {
+      disposed = true;
+      socket?.close();
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (pollingRef.current) window.clearInterval(pollingRef.current);
       pollingRef.current = null;
+      window.removeEventListener('focus', pollSales);
+      window.removeEventListener('online', pollSales);
+      document.removeEventListener('visibilitychange', recover);
     };
   }, [enabled, settings]);
 
   useEffect(() => setYoutubeReady(false), [youtubeId]);
+
+  useEffect(() => {
+    if (settings.source !== 'mp3' || !settings.url.trim()) return;
+    const audio = new Audio(settings.url.trim());
+    audio.preload = 'auto';
+    audio.volume = settings.volume / 100;
+    audio.load();
+    audioRef.current = audio;
+    return () => {
+      if (audioRef.current === audio) audioRef.current = null;
+      audio.pause();
+    };
+  }, [settings.source, settings.url, settings.volume]);
 
   useEffect(() => () => stopPlayback(), []);
 
@@ -305,6 +404,23 @@ export const MusicNotificationPage: React.FC = () => {
                 <span className="mt-1 block text-xs font-normal text-slate-500">O player para automaticamente neste ponto.</span>
               </label>
             </div>
+          )}
+
+          {settings.source === 'mp3' && (
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-500/50 bg-emerald-500/5 px-4 py-3 text-sm font-bold text-emerald-300 hover:bg-emerald-500/10">
+              <UploadCloud className="h-4 w-4" />
+              {uploading ? 'Enviando para o R2...' : 'Selecionar MP3 do computador e enviar ao R2'}
+              <input
+                type="file"
+                accept="audio/mpeg,.mp3"
+                disabled={uploading}
+                onChange={(event) => {
+                  uploadMp3(event.target.files?.[0]);
+                  event.target.value = '';
+                }}
+                className="hidden"
+              />
+            </label>
           )}
 
           <div className={`grid gap-4 ${settings.source === 'youtube' ? '' : 'sm:grid-cols-2'}`}>

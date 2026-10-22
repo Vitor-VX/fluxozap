@@ -1,11 +1,13 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
+import { createServer as createHttpServer } from 'node:http';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import os from 'os';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import { WebSocket, WebSocketServer } from 'ws';
 import { mongoService } from './src/services/mongodb';
 import { r2StorageService } from './src/services/r2Storage';
 import { normalizeAccountName } from './src/services/accountValidation';
@@ -2646,7 +2648,92 @@ async function handleIncomingUserMessage(
 
 async function startServer() {
   const app = express();
+  const httpServer = createHttpServer(app);
   const PORT = Number(process.env.PORT) || 3000;
+
+  type SaleNotificationSocket = WebSocket & { isAlive?: boolean };
+  const saleNotificationServer = new WebSocketServer({ noServer: true });
+  const saleNotificationSockets = new Set<SaleNotificationSocket>();
+
+  const serializeSaleNotification = (payment: XPagPaymentRecord) => ({
+    id: payment.saleNotificationId || payment.externalId,
+    confirmedAt: payment.saleConfirmedAt,
+    accountId: payment.accountId,
+    accountName: whatsappAccounts.find((account) => account.id === payment.accountId)?.name || 'Linha do WhatsApp',
+    amount: payment.amount,
+    currency: payment.currency,
+    method: payment.method,
+  });
+
+  const sendSaleSocketMessage = (socket: SaleNotificationSocket, payload: unknown): void => {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    try { socket.send(JSON.stringify(payload)); }
+    catch (error) { console.error('[Alertas de venda] Falha ao transmitir pelo WebSocket:', error); }
+  };
+
+  const broadcastSaleNotification = (payment: XPagPaymentRecord): void => {
+    const message = { type: 'sale_notification', event: serializeSaleNotification(payment) };
+    saleNotificationSockets.forEach((socket) => sendSaleSocketMessage(socket, message));
+  };
+
+  httpServer.on('upgrade', (request, socket, head) => {
+    let pathname = '';
+    try { pathname = new URL(request.url || '/', 'http://localhost').pathname; }
+    catch { socket.destroy(); return; }
+    if (pathname !== '/ws/sale-notifications') {
+      socket.destroy();
+      return;
+    }
+    saleNotificationServer.handleUpgrade(request, socket, head, (webSocket) => {
+      saleNotificationServer.emit('connection', webSocket, request);
+    });
+  });
+
+  saleNotificationServer.on('connection', (rawSocket) => {
+    const socket = rawSocket as SaleNotificationSocket;
+    socket.isAlive = true;
+    saleNotificationSockets.add(socket);
+    sendSaleSocketMessage(socket, { type: 'ready', cursor: new Date().toISOString() });
+    socket.on('pong', () => { socket.isAlive = true; });
+    socket.on('close', () => saleNotificationSockets.delete(socket));
+    socket.on('error', (error) => console.error('[Alertas de venda] WebSocket:', error.message));
+    socket.on('message', async (rawMessage) => {
+      try {
+        const message = JSON.parse(rawMessage.toString());
+        if (message?.type === 'ping') {
+          sendSaleSocketMessage(socket, { type: 'pong', timestamp: new Date().toISOString() });
+          return;
+        }
+        if (message?.type !== 'subscribe') return;
+        const after = new Date(String(message.after || ''));
+        if (Number.isNaN(after.getTime())) {
+          sendSaleSocketMessage(socket, { type: 'error', error: 'Cursor de notificação inválido.' });
+          return;
+        }
+        const payments = await mongoService.getConfirmedSalesForNotifications(after.toISOString());
+        sendSaleSocketMessage(socket, {
+          type: 'sale_notifications',
+          events: payments.map((payment: XPagPaymentRecord) => serializeSaleNotification(payment)),
+          cursor: new Date().toISOString(),
+        });
+      } catch (error: any) {
+        sendSaleSocketMessage(socket, { type: 'error', error: error.message || 'Mensagem WebSocket inválida.' });
+      }
+    });
+  });
+
+  const saleNotificationHeartbeat = setInterval(() => {
+    saleNotificationSockets.forEach((socket) => {
+      if (socket.isAlive === false) {
+        saleNotificationSockets.delete(socket);
+        socket.terminate();
+        return;
+      }
+      socket.isAlive = false;
+      try { socket.ping(); } catch { socket.terminate(); }
+    });
+  }, 30_000);
+  saleNotificationHeartbeat.unref();
 
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '25mb' }));
@@ -3192,15 +3279,7 @@ async function startServer() {
     }
     try {
       const payments = await mongoService.getConfirmedSalesForNotifications(after.toISOString());
-      const events = payments.map((payment: XPagPaymentRecord) => ({
-        id: payment.saleNotificationId || payment.externalId,
-        confirmedAt: payment.saleConfirmedAt,
-        accountId: payment.accountId,
-        accountName: whatsappAccounts.find((account) => account.id === payment.accountId)?.name || 'Linha do WhatsApp',
-        amount: payment.amount,
-        currency: payment.currency,
-        method: payment.method,
-      }));
+      const events = payments.map((payment: XPagPaymentRecord) => serializeSaleNotification(payment));
       res.json({ events, cursor: until.toISOString() });
     } catch (err: any) {
       res.status(500).json({ events: [], cursor: until.toISOString(), error: err.message || 'Não foi possível consultar novas vendas.' });
@@ -3236,6 +3315,42 @@ async function startServer() {
       res.status(500).json({ success: false, error: err.message || 'Não foi possível salvar o alerta musical.' });
     }
   });
+
+  app.post(
+    '/api/sale-music/upload',
+    express.raw({ type: ['audio/mpeg', 'audio/mp3', 'application/octet-stream'], limit: '100mb' }),
+    async (req: Request, res: Response) => {
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ success: false, error: 'Selecione um arquivo MP3.' });
+      }
+      if (req.body.length > MAX_MEDIA_BYTES) {
+        return res.status(413).json({ success: false, error: 'O MP3 excede o limite máximo de 100 MB.' });
+      }
+      let filename = String(req.headers['x-file-name'] || 'alerta-venda.mp3');
+      try { filename = decodeURIComponent(filename); } catch { /* keep original */ }
+      filename = path.basename(filename).replace(/[\r\n]/g, '_') || 'alerta-venda.mp3';
+      if (!filename.toLowerCase().endsWith('.mp3')) {
+        return res.status(400).json({ success: false, error: 'O arquivo do alerta precisa estar no formato MP3.' });
+      }
+      try {
+        const uploaded = await r2StorageService.uploadFile(req.body, filename, 'audio/mpeg', {
+          allowLocalFallback: false,
+        });
+        return res.json({
+          success: true,
+          url: uploaded.url,
+          filename: uploaded.filename,
+          size: req.body.length,
+          storage: 'r2',
+        });
+      } catch (error: any) {
+        return res.status(500).json({
+          success: false,
+          error: error.message || 'Não foi possível enviar o MP3 para o Cloudflare R2.',
+        });
+      }
+    }
+  );
 
   app.post('/api/meta-capi/sales/:externalId/retry', async (req: Request, res: Response) => {
     const accountId = String(req.body?.accountId || '');
@@ -3983,6 +4098,7 @@ async function startServer() {
       record.conversionEventTimes = { ...(record.conversionEventTimes || {}), [conversionKey]: confirmedAt };
       await mongoService.saveXPagPayment(record, true);
       saveXPagPayments();
+      broadcastSaleNotification(record);
       await sendMetaPurchaseConversion(record);
       await resumeXPagFlowBranch(record, 'paid', record.response);
     } catch (err: any) {
@@ -4941,7 +5057,7 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://0.0.0.0:${PORT}`);
   });
 }
