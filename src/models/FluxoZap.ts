@@ -72,6 +72,8 @@ const XPagPaymentSchema = new Schema(
     accountId: { type: String, index: true },
     status: { type: String, index: true },
     confirmedAt: { type: Date, index: true },
+    notificationId: { type: String, sparse: true, index: true },
+    notificationAt: { type: Date, sparse: true, index: true },
     data: { type: Schema.Types.Mixed, required: true },
   },
   { ...options, collection: 'xpag_payments' }

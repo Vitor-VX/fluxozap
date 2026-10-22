@@ -15,6 +15,7 @@ import {
   buildDurableSessionPersistenceUpdate,
   claimDueSessionBatch,
 } from './durableSessionScheduler';
+import { saleNotificationQueryAfter } from './saleNotificationCursor';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -414,7 +415,7 @@ class MongoService {
     return true;
   }
 
-  public async saveXPagPayment(data: any): Promise<boolean> {
+  public async saveXPagPayment(data: any, createSaleNotification = false): Promise<boolean> {
     if (!this.isConnected() || !data?.externalId) return false;
     await XPagPaymentModel.updateOne(
       { externalId: data.externalId },
@@ -428,19 +429,34 @@ class MongoService {
       } },
       { upsert: true }
     );
+    if (createSaleNotification) {
+      await XPagPaymentModel.updateOne(
+        { externalId: data.externalId },
+        {
+          $set: { notificationId: data.saleNotificationId || data.externalId },
+          $currentDate: { notificationAt: true },
+        }
+      );
+    }
     return true;
   }
 
-  public async getConfirmedSalesForNotifications(afterIso: string, untilIso: string, limit = 500): Promise<any[]> {
+  public async getConfirmedSalesForNotifications(afterIso: string, limit = 500): Promise<any[]> {
     if (!this.isConnected()) return [];
     const rows = await XPagPaymentModel.find({
       status: 'confirmed',
-      confirmedAt: { $gt: new Date(afterIso), $lte: new Date(untilIso) },
+      notificationAt: { $gt: saleNotificationQueryAfter(afterIso) },
     })
-      .sort({ confirmedAt: 1, _id: 1 })
+      .sort({ notificationAt: 1, _id: 1 })
       .limit(Math.min(500, Math.max(1, limit)))
       .lean();
-    return rows.map((row: any) => row.data).filter(Boolean);
+    return rows
+      .filter((row: any) => row.data)
+      .map((row: any) => ({
+        ...row.data,
+        saleNotificationId: row.notificationId,
+        saleNotificationAt: row.notificationAt?.toISOString?.() || row.notificationAt,
+      }));
   }
 
   public async getXPagPaymentByWebhookKeyHash(webhookKeyHash: string): Promise<any | null> {

@@ -516,6 +516,8 @@ interface XPagPaymentRecord {
   expiresAt?: string;
   paidAt?: string;
   saleConfirmedAt?: string;
+  saleNotificationId?: string;
+  saleNotificationAt?: string;
   method: XPagPaymentMethod;
   amount: number;
   currency: XPagCurrency;
@@ -3189,12 +3191,9 @@ async function startServer() {
       return res.json({ events: [], cursor: until.toISOString() });
     }
     try {
-      const payments = await mongoService.getConfirmedSalesForNotifications(
-        after.toISOString(),
-        until.toISOString()
-      );
+      const payments = await mongoService.getConfirmedSalesForNotifications(after.toISOString());
       const events = payments.map((payment: XPagPaymentRecord) => ({
-        id: payment.externalId,
+        id: payment.saleNotificationId || payment.externalId,
         confirmedAt: payment.saleConfirmedAt,
         accountId: payment.accountId,
         accountName: whatsappAccounts.find((account) => account.id === payment.accountId)?.name || 'Linha do WhatsApp',
@@ -3977,10 +3976,12 @@ async function startServer() {
       const confirmedAt = new Date().toISOString();
       record.paidAt = normalizeXPagDate(firstXPagValue(verificationData.paid_at, verificationData.confirmed_at)) || confirmedAt;
       record.saleConfirmedAt = confirmedAt;
+      record.saleNotificationId = `sale_${crypto.randomUUID()}`;
       record.response = { ...record.response, verification, webhook: event };
       record.updatedAt = confirmedAt;
       const conversionKey = getMetaConversionKey(record);
       record.conversionEventTimes = { ...(record.conversionEventTimes || {}), [conversionKey]: confirmedAt };
+      await mongoService.saveXPagPayment(record, true);
       saveXPagPayments();
       await sendMetaPurchaseConversion(record);
       await resumeXPagFlowBranch(record, 'paid', record.response);
