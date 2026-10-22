@@ -126,6 +126,12 @@ Fotos, áudios, vídeos e documentos recebidos ou enviados pelos blocos têm lim
 
 O bloco **Enviar Áudio / Voz** envia como mensagem de voz por padrão. O servidor converte automaticamente MP3, M4A, WAV e outros formatos de áudio para OGG/Opus mono e inclui `voice: true` no payload da Meta. A opção pode ser desmarcada no bloco quando o objetivo for enviar um anexo de áudio comum.
 
+## Alerta musical de vendas
+
+A página `/musica` aceita uma URL pública de MP3 ou um arquivo MP3 local, que é enviado ao Cloudflare R2. O início e o final do trecho são configuráveis, com duração máxima de cinco minutos. Alertas novos são entregues ao painel por WebSocket, com reconexão automática e consulta HTTP como fallback.
+
+Também é possível importar um trecho de um vídeo do YouTube quando você possuir autorização para utilizar o conteúdo. Essa conversão exige `yt-dlp` e `ffmpeg` instalados na VPS e disponíveis no `PATH`. Caminhos personalizados podem ser definidos por `YT_DLP_PATH` e `FFMPEG_PATH`. O servidor baixa somente um vídeo, recorta o intervalo escolhido, gera o MP3 e o envia ao R2.
+
 ## Intervalo entre blocos e editor visual
 
 Cada bloco executável pode ativar **Aguardar antes do próximo bloco**, com duração em segundos, minutos, horas, dias ou meses. Essa espera usa o agendador persistente das sessões: o próximo bloco e o horário de retomada são salvos, portanto o funil continua corretamente após reiniciar o servidor. O bloco independente **Tempo de Espera** permanece disponível.

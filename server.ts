@@ -15,6 +15,7 @@ import { mergeLegacyAndMongoSessions } from './src/services/legacySessionMigrati
 import {
   DEFAULT_SALE_MUSIC_SETTINGS,
   normalizeSaleMusicSettings,
+  parseSaleMusicTimecode,
   validateSaleMusicSettings,
 } from './src/services/saleMusicSettings';
 import {
@@ -1451,6 +1452,78 @@ interface OutgoingMediaPayload {
 
 const MAX_META_AUDIO_BYTES = 16 * 1024 * 1024;
 const convertedVoiceMediaIds = new Map<string, string>();
+
+async function runMediaCommand(command: string, args: string[], missingMessage: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true });
+    let diagnostic = '';
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error('A conversão do áudio excedeu o tempo máximo de 3 minutos.'));
+    }, 180_000);
+    child.stderr.on('data', (chunk) => {
+      if (diagnostic.length < 6000) diagnostic += String(chunk);
+    });
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      clearTimeout(timeout);
+      reject(error.code === 'ENOENT' ? new Error(missingMessage) : error);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve();
+      else reject(new Error(diagnostic.trim() || `O processo ${command} terminou com código ${code}.`));
+    });
+  });
+}
+
+async function downloadAuthorizedYouTubeSegment(
+  videoUrl: string,
+  startAt: number,
+  endAt: number
+): Promise<Buffer> {
+  const parsedUrl = new URL(videoUrl);
+  const isYouTube = parsedUrl.hostname === 'youtu.be' ||
+    parsedUrl.hostname === 'youtube.com' || parsedUrl.hostname.endsWith('.youtube.com');
+  if (!isYouTube) throw new Error('Informe uma URL válida do YouTube.');
+  if (endAt <= startAt || endAt - startAt > 300) {
+    throw new Error('Escolha um trecho de até 5 minutos, com o final posterior ao início.');
+  }
+
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'fluxozap-sale-music-'));
+  const sourceTemplate = path.join(tempDirectory, 'source.%(ext)s');
+  const outputPath = path.join(tempDirectory, 'alerta-venda.mp3');
+  try {
+    await runMediaCommand(
+      process.env.YT_DLP_PATH?.trim() || 'yt-dlp',
+      ['--no-playlist', '--no-progress', '--max-filesize', '100M', '-f', 'bestaudio', '-o', sourceTemplate, videoUrl],
+      'yt-dlp não foi encontrado na VPS. Instale o yt-dlp e tente novamente.'
+    );
+    const sourcePath = fs.readdirSync(tempDirectory)
+      .map((filename) => path.join(tempDirectory, filename))
+      .find((candidate) => candidate !== outputPath && fs.statSync(candidate).isFile());
+    if (!sourcePath) throw new Error('O YouTube não retornou um arquivo de áudio utilizável.');
+    await runMediaCommand(
+      process.env.FFMPEG_PATH?.trim() || 'ffmpeg',
+      [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-ss', String(startAt), '-i', sourcePath,
+        '-t', String(endAt - startAt), '-vn',
+        '-c:a', 'libmp3lame', '-q:a', '2', outputPath,
+      ],
+      'FFmpeg não foi encontrado na VPS. Instale o FFmpeg e tente novamente.'
+    );
+    const output = fs.readFileSync(outputPath);
+    if (!output.length) throw new Error('A conversão do YouTube gerou um MP3 vazio.');
+    if (output.length > MAX_MEDIA_BYTES) throw new Error('O MP3 convertido excede o limite máximo de 100 MB.');
+    return output;
+  } finally {
+    const safeTempRoot = path.resolve(os.tmpdir());
+    const safeTarget = path.resolve(tempDirectory);
+    if (safeTarget.startsWith(`${safeTempRoot}${path.sep}`) && path.basename(safeTarget).startsWith('fluxozap-sale-music-')) {
+      fs.rmSync(safeTarget, { recursive: true, force: true });
+    }
+  }
+}
 
 async function convertAudioToWhatsAppVoice(
   buffer: Buffer,
@@ -3351,6 +3424,39 @@ async function startServer() {
       }
     }
   );
+
+  app.post('/api/sale-music/import-youtube', async (req: Request, res: Response) => {
+    try {
+      const videoUrl = String(req.body?.url || '').trim();
+      const startAt = parseSaleMusicTimecode(String(req.body?.start || ''));
+      const endAt = parseSaleMusicTimecode(String(req.body?.end || ''));
+      if (startAt === null || endAt === null) {
+        return res.status(400).json({ success: false, error: 'Informe horários válidos para o início e o final.' });
+      }
+      const mp3 = await downloadAuthorizedYouTubeSegment(videoUrl, startAt, endAt);
+      const uploaded = await r2StorageService.uploadFile(
+        mp3,
+        `alerta-youtube-${Date.now()}.mp3`,
+        'audio/mpeg',
+        { allowLocalFallback: false }
+      );
+      const durationSeconds = endAt - startAt;
+      return res.json({
+        success: true,
+        url: uploaded.url,
+        filename: uploaded.filename,
+        size: mp3.length,
+        mp3Start: '00:00',
+        mp3End: `${Math.floor(durationSeconds / 60)}:${String(durationSeconds % 60).padStart(2, '0')}`,
+        storage: 'r2',
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        error: error.message || 'Não foi possível importar o trecho do YouTube.',
+      });
+    }
+  });
 
   app.post('/api/meta-capi/sales/:externalId/retry', async (req: Request, res: Response) => {
     const accountId = String(req.body?.accountId || '');

@@ -6,6 +6,7 @@ import {
   type SaleMusicPresetTone,
   type SaleMusicSettings,
 } from '../../services/saleMusicSettings';
+import { playAudioSegment } from '../../services/saleMusicAudio';
 
 type MusicSettings = SaleMusicSettings;
 type PresetTone = SaleMusicPresetTone;
@@ -101,6 +102,9 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
     if (settings.source === 'preset') return playPreset();
     if (settings.source === 'mp3') {
       if (!settings.url.trim()) throw new Error('Configure uma URL de MP3 em /musica.');
+      const startAt = parseSaleMusicTimecode(settings.mp3Start);
+      const endAt = parseSaleMusicTimecode(settings.mp3End);
+      if (startAt === null || endAt === null || endAt <= startAt) throw new Error('Revise o início e o fim do trecho do MP3.');
       const sourceUrl = settings.url.trim();
       const audio = audioRef.current?.src === new URL(sourceUrl, window.location.href).href
         ? audioRef.current
@@ -108,9 +112,8 @@ export const GlobalSaleMusicMonitor: React.FC = () => {
       audio.preload = 'auto';
       audio.volume = settings.volume / 100;
       audioRef.current = audio;
-      audio.currentTime = 0;
-      await audio.play();
-      stopTimerRef.current = window.setTimeout(stopPlayback, settings.durationSeconds * 1000);
+      await playAudioSegment(audio, startAt);
+      stopTimerRef.current = window.setTimeout(stopPlayback, (endAt - startAt) * 1000);
       return;
     }
     const startAt = parseSaleMusicTimecode(settings.youtubeStart);

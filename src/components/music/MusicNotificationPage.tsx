@@ -7,6 +7,7 @@ import {
   type SaleMusicPresetTone,
   type SaleMusicSettings,
 } from '../../services/saleMusicSettings';
+import { playAudioSegment } from '../../services/saleMusicAudio';
 
 type MusicSettings = SaleMusicSettings;
 type PresetTone = SaleMusicPresetTone;
@@ -55,6 +56,7 @@ export const MusicNotificationPage: React.FC = () => {
   const [lastSale, setLastSale] = useState<SaleNotification | null>(null);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [importingYoutube, setImportingYoutube] = useState(false);
   const [youtubeReady, setYoutubeReady] = useState(false);
   const cursorRef = useRef('');
   const pollingRef = useRef<number | null>(null);
@@ -119,6 +121,9 @@ export const MusicNotificationPage: React.FC = () => {
       stopTimerRef.current = window.setTimeout(stopPlayback, (endAt - startAt) * 1000);
       return;
     } else {
+      const startAt = parseSaleMusicTimecode(settings.mp3Start);
+      const endAt = parseSaleMusicTimecode(settings.mp3End);
+      if (startAt === null || endAt === null || endAt <= startAt) throw new Error('Revise o início e o fim do trecho do MP3.');
       const sourceUrl = settings.url.trim();
       const audio = audioRef.current?.src === new URL(sourceUrl, window.location.href).href
         ? audioRef.current
@@ -126,8 +131,9 @@ export const MusicNotificationPage: React.FC = () => {
       audio.preload = 'auto';
       audio.volume = settings.volume / 100;
       audioRef.current = audio;
-      audio.currentTime = 0;
-      await audio.play();
+      await playAudioSegment(audio, startAt);
+      stopTimerRef.current = window.setTimeout(stopPlayback, (endAt - startAt) * 1000);
+      return;
     }
     stopTimerRef.current = window.setTimeout(stopPlayback, settings.durationSeconds * 1000);
   };
@@ -138,6 +144,18 @@ export const MusicNotificationPage: React.FC = () => {
       const endAt = parseSaleMusicTimecode(settings.youtubeEnd);
       if (startAt === null || endAt === null || endAt <= startAt) {
         setStatus('Revise o início e o fim do trecho do YouTube. Exemplo: 1:10 até 1:30.');
+        return;
+      }
+    }
+    if (settings.source === 'mp3') {
+      const startAt = parseSaleMusicTimecode(settings.mp3Start);
+      const endAt = parseSaleMusicTimecode(settings.mp3End);
+      if (startAt === null || endAt === null || endAt <= startAt) {
+        setStatus('Revise o início e o fim do trecho do MP3. Exemplo: 1:10 até 1:30.');
+        return;
+      }
+      if (youtubeVideoId(settings.url)) {
+        setStatus('Primeiro clique em “Importar trecho do YouTube para o R2”.');
         return;
       }
     }
@@ -189,6 +207,42 @@ export const MusicNotificationPage: React.FC = () => {
       setStatus(error.message || 'Não foi possível enviar o MP3 para o R2.');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const importYoutubeToR2 = async () => {
+    if (!youtubeVideoId(settings.url)) {
+      setStatus('Informe uma URL válida do YouTube no campo acima.');
+      return;
+    }
+    const startAt = parseSaleMusicTimecode(settings.mp3Start);
+    const endAt = parseSaleMusicTimecode(settings.mp3End);
+    if (startAt === null || endAt === null || endAt <= startAt) {
+      setStatus('Revise o início e o fim do trecho antes de importar.');
+      return;
+    }
+    setImportingYoutube(true);
+    setStatus('Baixando o trecho autorizado, convertendo para MP3 e enviando ao R2...');
+    try {
+      const response = await fetch('/api/sale-music/import-youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: settings.url, start: settings.mp3Start, end: settings.mp3End }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Não foi possível importar o trecho do YouTube.');
+      setSettings((current) => ({
+        ...current,
+        source: 'mp3',
+        url: payload.url,
+        mp3Start: payload.mp3Start,
+        mp3End: payload.mp3End,
+      }));
+      setStatus('Trecho convertido e salvo no R2. Clique em “Salvar configuração” para torná-lo global.');
+    } catch (error: any) {
+      setStatus(error.message || 'Não foi possível importar o trecho do YouTube.');
+    } finally {
+      setImportingYoutube(false);
     }
   };
 
@@ -387,8 +441,8 @@ export const MusicNotificationPage: React.FC = () => {
               </select>
             </label>
           ) : (
-            <label className="block text-sm font-semibold text-slate-300">{settings.source === 'youtube' ? 'URL do YouTube' : 'URL pública do arquivo MP3'}
-              <input type="url" value={settings.url} onChange={(event) => setSettings((current) => ({ ...current, url: event.target.value }))} placeholder={settings.source === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'https://exemplo.com/musica.mp3'} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-emerald-400" />
+            <label className="block text-sm font-semibold text-slate-300">{settings.source === 'youtube' ? 'URL do YouTube' : 'URL pública do MP3 ou URL do YouTube para importar'}
+              <input type="url" value={settings.url} onChange={(event) => setSettings((current) => ({ ...current, url: event.target.value }))} placeholder={settings.source === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'https://cdn.exemplo.com/musica.mp3 ou https://youtu.be/...'} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-emerald-400" />
               {settings.source === 'youtube' && settings.url && !youtubeId && <span className="mt-1 block text-xs text-rose-400">Link do YouTube inválido.</span>}
             </label>
           )}
@@ -404,6 +458,26 @@ export const MusicNotificationPage: React.FC = () => {
                 <span className="mt-1 block text-xs font-normal text-slate-500">O player para automaticamente neste ponto.</span>
               </label>
             </div>
+          )}
+
+          {settings.source === 'mp3' && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-semibold text-slate-300">Começar em
+                <input type="text" inputMode="numeric" value={settings.mp3Start} onChange={(event) => setSettings((current) => ({ ...current, mp3Start: event.target.value }))} placeholder="1:10" className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-slate-100 outline-none focus:border-emerald-400" />
+                <span className="mt-1 block text-xs font-normal text-slate-500">Aceita MM:SS ou HH:MM:SS.</span>
+              </label>
+              <label className="text-sm font-semibold text-slate-300">Terminar em
+                <input type="text" inputMode="numeric" value={settings.mp3End} onChange={(event) => setSettings((current) => ({ ...current, mp3End: event.target.value }))} placeholder="1:30" className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-slate-100 outline-none focus:border-emerald-400" />
+                <span className="mt-1 block text-xs font-normal text-slate-500">Trecho máximo de 5 minutos.</span>
+              </label>
+            </div>
+          )}
+
+          {settings.source === 'mp3' && youtubeVideoId(settings.url) && (
+            <button type="button" disabled={importingYoutube} onClick={importYoutubeToR2} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200 hover:bg-red-500/20 disabled:opacity-60">
+              <UploadCloud className="h-4 w-4" />
+              {importingYoutube ? 'Convertendo e enviando ao R2...' : 'Importar trecho autorizado do YouTube para o R2'}
+            </button>
           )}
 
           {settings.source === 'mp3' && (
@@ -424,7 +498,7 @@ export const MusicNotificationPage: React.FC = () => {
           )}
 
           <div className={`grid gap-4 ${settings.source === 'youtube' ? '' : 'sm:grid-cols-2'}`}>
-            {settings.source !== 'youtube' && <label className="text-sm font-semibold text-slate-300">Duração máxima
+            {settings.source === 'preset' && <label className="text-sm font-semibold text-slate-300">Duração máxima
               <div className="mt-2 flex items-center gap-2"><input type="number" min={1} max={300} value={settings.durationSeconds} onChange={(event) => setSettings((current) => ({ ...current, durationSeconds: Number(event.target.value) }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-emerald-400" /><span className="text-slate-500">segundos</span></div>
             </label>}
             <label className="text-sm font-semibold text-slate-300">Volume: {settings.volume}%
