@@ -45,7 +45,9 @@ interface ConversationsListProps {
 interface PendingMediaUpload {
   key: string;
   type: 'image' | 'audio' | 'document';
-  mediaId: string;
+  storage: 'meta' | 'r2';
+  mediaId?: string;
+  mediaUrl?: string;
   mediaMimeType: string;
   filename: string;
   previewUrl?: string;
@@ -110,6 +112,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   // Agent chat input state
   const [agentText, setAgentText] = useState('');
   const [agentMediaType, setAgentMediaType] = useState<'text' | 'image' | 'audio' | 'document'>('text');
+  const [agentAudioStorage, setAgentAudioStorage] = useState<'meta' | 'r2'>('meta');
   const [agentMediaUrl, setAgentMediaUrl] = useState('');
   const [agentCaption, setAgentCaption] = useState('');
   const [pendingMediaUploads, setPendingMediaUploads] = useState<PendingMediaUpload[]>([]);
@@ -286,8 +289,10 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
             ...pendingMediaUploads.map((item) => ({
               type: item.type,
               mediaId: item.mediaId,
+              mediaUrl: item.mediaUrl,
               mediaMimeType: item.mediaMimeType,
               filename: item.filename,
+              sendByLink: item.storage === 'r2',
             })),
             ...externalUrls.map((mediaUrl) => ({ type: agentMediaType, mediaUrl })),
           ];
@@ -366,9 +371,11 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     try {
       const uploaded: PendingMediaUpload[] = [];
       for (const file of files) {
+        const useR2 = agentMediaType === 'audio' && agentAudioStorage === 'r2';
         const uploadParams = new URLSearchParams({ accountId: activeAccountId || '' });
         if (agentMediaType === 'audio') uploadParams.set('voice', 'true');
-        const res = await fetch(`/api/meta/media?${uploadParams.toString()}`, {
+        const uploadUrl = useR2 ? '/api/r2/media' : `/api/meta/media?${uploadParams.toString()}`;
+        const res = await fetch(uploadUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/octet-stream',
@@ -380,11 +387,14 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
         const raw = await res.text();
         let data: any = {};
         try { data = JSON.parse(raw); } catch { data = { error: raw }; }
-        if (!res.ok || !data.mediaId) throw new Error(data.error || `A Meta recusou o upload de ${file.name}.`);
+        const uploadedReference = useR2 ? data.mediaUrl : data.mediaId;
+        if (!res.ok || !uploadedReference) throw new Error(data.error || `${useR2 ? 'O Cloudflare R2' : 'A Meta'} recusou o upload de ${file.name}.`);
         uploaded.push({
-          key: `${data.mediaId}_${file.name}`,
+          key: `${uploadedReference}_${file.name}`,
           type: agentMediaType === 'audio' ? 'audio' : file.type.startsWith('image/') ? 'image' : 'document',
-          mediaId: data.mediaId,
+          storage: useR2 ? 'r2' : 'meta',
+          mediaId: useR2 ? undefined : data.mediaId,
+          mediaUrl: useR2 ? data.mediaUrl : undefined,
           mediaMimeType: data.mimeType || file.type,
           filename: data.filename || file.name,
           previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
@@ -392,7 +402,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       }
       setPendingMediaUploads((current) => [...current, ...uploaded]);
     } catch (err: any) {
-      setSendError(err.message || 'Falha no upload direto para a Meta.');
+      setSendError(err.message || `Falha no upload para ${agentMediaType === 'audio' && agentAudioStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}.`);
     } finally {
       setIsUploadingFile(false);
       e.target.value = '';
@@ -1226,6 +1236,32 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                   </div>
                 ) : (
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                    {agentMediaType === 'audio' && (
+                      <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                        <p className="mb-2 text-[11px] font-semibold text-slate-700">Destino do áudio do computador</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setAgentAudioStorage('meta')}
+                            className={`rounded-lg border px-3 py-2 text-[11px] font-semibold transition-colors ${agentAudioStorage === 'meta' ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-200' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+                          >
+                            Direto para Meta
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAgentAudioStorage('r2')}
+                            className={`rounded-lg border px-3 py-2 text-[11px] font-semibold transition-colors ${agentAudioStorage === 'r2' ? 'border-orange-500 bg-orange-50 text-orange-700 ring-1 ring-orange-200' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+                          >
+                            Cloudflare R2
+                          </button>
+                        </div>
+                        <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                          {agentAudioStorage === 'r2'
+                            ? 'O áudio ficará salvo no R2 e será enviado ao WhatsApp pela URL pública.'
+                            : 'O áudio será convertido em mensagem de voz e preparado diretamente na biblioteca da Meta.'}
+                        </p>
+                      </div>
+                    )}
                     {/* Direct computer upload button */}
                     <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-lg border border-slate-200">
                       <span className="text-[11px] text-slate-600 font-medium">
@@ -1249,7 +1285,9 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                             {item.previewUrl ? <img src={item.previewUrl} alt="Preview" className="h-10 w-10 rounded-md border object-cover" /> : item.type === 'audio' ? <Volume2 className="h-5 w-5 shrink-0 text-orange-600" /> : <FileText className="h-5 w-5 shrink-0 text-amber-600" />}
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-semibold text-slate-800">{item.filename}</p>
-                              <p className="text-[10px] font-medium text-emerald-600">Preparado na Meta</p>
+                              <p className={`text-[10px] font-medium ${item.storage === 'r2' ? 'text-orange-600' : 'text-emerald-600'}`}>
+                                {item.storage === 'r2' ? 'Salvo no Cloudflare R2' : 'Preparado na Meta'}
+                              </p>
                             </div>
                             <button
                               type="button"

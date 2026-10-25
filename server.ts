@@ -1454,6 +1454,7 @@ interface OutgoingMediaPayload {
   caption?: string;
   filename?: string;
   voice?: boolean;
+  sendByLink?: boolean;
   replyToMessageId?: string;
 }
 
@@ -1789,6 +1790,11 @@ async function sendMetaWhatsAppMessage(
     if (messageType === 'text') {
       body.type = 'text';
       body.text = { preview_url: false, body: payload.text || '' };
+    } else if (payload.sendByLink && payload.mediaUrl && /^https:\/\//i.test(payload.mediaUrl)) {
+      body.type = messageType;
+      body[messageType] = { link: payload.mediaUrl };
+      if (messageType !== 'audio' && payload.caption) body[messageType].caption = payload.caption;
+      if (messageType === 'document') body.document.filename = payload.filename || 'documento.pdf';
     } else {
       const mediaId = await resolveOutgoingMediaId(payload, {
         ...accountOverride,
@@ -5095,6 +5101,7 @@ async function startServer() {
       accountId,
       replyToMessageId,
       sendAsVoice = false,
+      sendByLink = false,
     } = req.body;
 
     const cleanPhone = phoneNumber.replace(/\D/g, '');
@@ -5126,7 +5133,7 @@ async function startServer() {
       } else if (type === 'document') {
         sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'document', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       } else if (type === 'audio') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename, replyToMessageId, voice: sendAsVoice === true }, accountCredentials);
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename, replyToMessageId, voice: sendAsVoice === true, sendByLink: sendByLink === true }, accountCredentials);
       } else if (type === 'video') {
         sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'video', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       }
