@@ -5094,6 +5094,7 @@ async function startServer() {
       pauseBot = false,
       accountId,
       replyToMessageId,
+      sendAsVoice = false,
     } = req.body;
 
     const cleanPhone = phoneNumber.replace(/\D/g, '');
@@ -5125,7 +5126,7 @@ async function startServer() {
       } else if (type === 'document') {
         sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'document', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       } else if (type === 'audio') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename, replyToMessageId }, accountCredentials);
+        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename, replyToMessageId, voice: sendAsVoice === true }, accountCredentials);
       } else if (type === 'video') {
         sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'video', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       }
@@ -5135,7 +5136,7 @@ async function startServer() {
         id: sendResult.data?.messages?.[0]?.id || `agent_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         sender: 'agent' as const,
         type: type as any,
-        content: text || caption || (type === 'image' ? '[Imagem enviada]' : '[Arquivo enviado]'),
+        content: text || caption || (type === 'image' ? '[Imagem enviada]' : type === 'audio' ? '[Áudio enviado]' : '[Arquivo enviado]'),
         mediaUrl: mediaId ? undefined : mediaUrl,
         filename,
         caption,

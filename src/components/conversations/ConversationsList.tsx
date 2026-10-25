@@ -44,7 +44,7 @@ interface ConversationsListProps {
 
 interface PendingMediaUpload {
   key: string;
-  type: 'image' | 'document';
+  type: 'image' | 'audio' | 'document';
   mediaId: string;
   mediaMimeType: string;
   filename: string;
@@ -109,7 +109,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
 
   // Agent chat input state
   const [agentText, setAgentText] = useState('');
-  const [agentMediaType, setAgentMediaType] = useState<'text' | 'image' | 'document'>('text');
+  const [agentMediaType, setAgentMediaType] = useState<'text' | 'image' | 'audio' | 'document'>('text');
   const [agentMediaUrl, setAgentMediaUrl] = useState('');
   const [agentCaption, setAgentCaption] = useState('');
   const [pendingMediaUploads, setPendingMediaUploads] = useState<PendingMediaUpload[]>([]);
@@ -300,7 +300,8 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...message,
-            caption: agentMediaType === 'text' ? undefined : agentCaption,
+            caption: agentMediaType === 'text' || agentMediaType === 'audio' ? undefined : agentCaption,
+            sendAsVoice: message.type === 'audio' && 'mediaId' in message && Boolean(message.mediaId),
             pauseBot: true,
             accountId: selectedSession.accountId,
             replyToMessageId: index === 0 ? replyingTo?.id : undefined,
@@ -365,7 +366,9 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     try {
       const uploaded: PendingMediaUpload[] = [];
       for (const file of files) {
-        const res = await fetch(`/api/meta/media?accountId=${encodeURIComponent(activeAccountId || '')}`, {
+        const uploadParams = new URLSearchParams({ accountId: activeAccountId || '' });
+        if (agentMediaType === 'audio') uploadParams.set('voice', 'true');
+        const res = await fetch(`/api/meta/media?${uploadParams.toString()}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/octet-stream',
@@ -380,7 +383,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
         if (!res.ok || !data.mediaId) throw new Error(data.error || `A Meta recusou o upload de ${file.name}.`);
         uploaded.push({
           key: `${data.mediaId}_${file.name}`,
-          type: file.type.startsWith('image/') ? 'image' : 'document',
+          type: agentMediaType === 'audio' ? 'audio' : file.type.startsWith('image/') ? 'image' : 'document',
           mediaId: data.mediaId,
           mediaMimeType: data.mimeType || file.type,
           filename: data.filename || file.name,
@@ -1112,7 +1115,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
               ref={fileInputRef}
               onChange={handleFileUpload}
               className="hidden"
-              accept={agentMediaType === 'image' ? 'image/*' : agentMediaType === 'document' ? '.pdf,.doc,.docx,.xls,.xlsx,.txt' : '*/*'}
+              accept={agentMediaType === 'image' ? 'image/*' : agentMediaType === 'audio' ? 'audio/*' : agentMediaType === 'document' ? '.pdf,.doc,.docx,.xls,.xlsx,.txt' : '*/*'}
             />
 
             {/* Agent Live Reply Input Box */}
@@ -1187,6 +1190,18 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                   <FileText className="w-3 h-3" />
                   <span>Enviar Documento</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setAgentMediaType('audio')}
+                  className={`px-2 py-0.5 rounded cursor-pointer transition-colors flex items-center gap-1 ${
+                    agentMediaType === 'audio'
+                      ? 'bg-orange-600 text-white font-semibold'
+                      : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
+                  }`}
+                >
+                  <Volume2 className="w-3 h-3" />
+                  <span>Enviar Áudio</span>
+                </button>
               </div>
 
               {/* Form depending on media type */}
@@ -1231,7 +1246,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                       <div className="space-y-1.5">
                         {pendingMediaUploads.map((item) => (
                           <div key={item.key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
-                            {item.previewUrl ? <img src={item.previewUrl} alt="Preview" className="h-10 w-10 rounded-md border object-cover" /> : <FileText className="h-5 w-5 shrink-0 text-amber-600" />}
+                            {item.previewUrl ? <img src={item.previewUrl} alt="Preview" className="h-10 w-10 rounded-md border object-cover" /> : item.type === 'audio' ? <Volume2 className="h-5 w-5 shrink-0 text-orange-600" /> : <FileText className="h-5 w-5 shrink-0 text-amber-600" />}
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-semibold text-slate-800">{item.filename}</p>
                               <p className="text-[10px] font-medium text-emerald-600">Preparado na Meta</p>
@@ -1260,14 +1275,16 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                         rows={3}
                         value={agentMediaUrl}
                         onChange={(e) => setAgentMediaUrl(e.target.value)}
-                        placeholder={'https://exemplo.com/arquivo-1.pdf\nhttps://exemplo.com/arquivo-2.pdf'}
+                        placeholder={agentMediaType === 'audio' ? 'https://exemplo.com/audio-1.mp3\nhttps://exemplo.com/audio-2.ogg' : 'https://exemplo.com/arquivo-1.pdf\nhttps://exemplo.com/arquivo-2.pdf'}
                         className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
                       />
                       <p className="text-[10px] text-slate-500 mt-1">
-                        Arquivos do computador vão direto para a Meta. URLs externas são baixadas pelo servidor e reenviadas como mídia da Meta.
+                        {agentMediaType === 'audio'
+                          ? 'Áudios do computador são preparados como mensagem de voz e enviados direto pela Meta. URLs externas são enviadas como áudio comum.'
+                          : 'Arquivos do computador vão direto para a Meta. URLs externas são baixadas pelo servidor e reenviadas como mídia da Meta.'}
                       </p>
                     </div>
-                    <div>
+                    {agentMediaType !== 'audio' && <div>
                       <label className="block font-semibold text-slate-700 mb-0.5">Legenda / Texto Acompanhante</label>
                       <input
                         type="text"
@@ -1276,7 +1293,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                         placeholder="Mensagem acompanhando a foto ou documento..."
                         className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
                       />
-                    </div>
+                    </div>}
                     <div className="flex justify-end gap-2 pt-1">
                       <button
                         type="button"
