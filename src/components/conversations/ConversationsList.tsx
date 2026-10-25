@@ -119,6 +119,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   const [sendError, setSendError] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [isUpdatingBlock, setIsUpdatingBlock] = useState(false);
 
   // File input ref for choosing files from computer
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -444,7 +445,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   // Clear Chat History
   const handleClearHistory = async () => {
     if (!selectedSession) return;
-    if (!confirm(`Deseja limpar todo o histórico de mensagens de ${selectedSession.phoneNumber}?`)) return;
+    if (!confirm(`Deseja apagar do FluxoZap todo o histórico de mensagens de ${selectedSession.phoneNumber}?\n\nAs mensagens já entregues no WhatsApp do cliente não podem ser removidas pela API oficial da Meta.`)) return;
 
     try {
       const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}/clear-history`, {
@@ -459,6 +460,34 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       }
     } catch (err) {
       console.error('Error clearing history:', err);
+    }
+  };
+
+  const handleToggleBlock = async () => {
+    if (!selectedSession) return;
+    const nextBlocked = !selectedSession.isBlocked;
+    const action = nextBlocked ? 'BLOQUEAR' : 'DESBLOQUEAR';
+    const detail = nextBlocked
+      ? 'A Meta deixará de entregar novas mensagens deste contato para esta linha e o FluxoZap não poderá responder.'
+      : 'O contato poderá voltar a enviar mensagens para esta linha.';
+    if (!confirm(`Deseja ${action} ${selectedSession.phoneNumber}?\n\n${detail}`)) return;
+
+    setIsUpdatingBlock(true);
+    setSendError(null);
+    try {
+      const res = await fetch(`/api/sessions/${selectedSession.phoneNumber}/block-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: selectedSession.accountId, blocked: nextBlocked }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error([data.error, data.diagnosticTip].filter(Boolean).join(' ') || `Não foi possível ${nextBlocked ? 'bloquear' : 'desbloquear'} o contato.`);
+      setSelectedSession(data.session);
+      await fetchSessions(true);
+    } catch (err: any) {
+      setSendError(err.message || 'Erro ao atualizar o bloqueio do contato.');
+    } finally {
+      setIsUpdatingBlock(false);
     }
   };
 
@@ -781,6 +810,11 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                         Robô Pausado
                       </span>
                     )}
+                    {selectedSession.isBlocked && (
+                      <span className="text-[10px] font-semibold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full border border-rose-200">
+                        Contato bloqueado
+                      </span>
+                    )}
                   </div>
 
                   <p className="text-[11px] text-slate-500 font-mono mt-0.5">
@@ -790,7 +824,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
               </div>
 
               {/* Action Buttons: Toggle Bot, Restart Flow, Delete */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 {selectedSession.variables && Object.keys(selectedSession.variables).length > 0 && (
                   <button
                     type="button"
@@ -832,7 +866,8 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                 <button
                   type="button"
                   onClick={() => handleRestartFlow(false)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold cursor-pointer transition-colors"
+                  disabled={selectedSession.isBlocked}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold cursor-pointer transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                   title="Restaurar fluxo: na próxima mensagem, o cliente recebe o funil do início"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -841,11 +876,27 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
 
                 <button
                   type="button"
+                  onClick={handleToggleBlock}
+                  disabled={isUpdatingBlock}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors disabled:opacity-50 ${
+                    selectedSession.isBlocked
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                  }`}
+                  title={selectedSession.isBlocked ? 'Desbloquear este contato na Meta' : 'Bloquear este contato na Meta'}
+                >
+                  {isUpdatingBlock ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                  <span>{selectedSession.isBlocked ? 'Desbloquear' : 'Bloquear'}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleClearHistory}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
-                  title="Limpar histórico de mensagens"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
+                  title="Apaga apenas o histórico armazenado no FluxoZap; não remove mensagens do WhatsApp do cliente"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Apagar mensagens</span>
                 </button>
 
                 <button
@@ -1066,6 +1117,12 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
 
             {/* Agent Live Reply Input Box */}
             <div className="p-4 bg-white border-t border-slate-200 shrink-0 space-y-2">
+              {selectedSession.isBlocked && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-900 text-[11px] flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span><strong>Contato bloqueado:</strong> desbloqueie-o para voltar a receber ou enviar mensagens nesta linha.</span>
+                </div>
+              )}
               {replyingTo && (
                 <div className="flex items-center gap-3 rounded-lg border-l-4 border-emerald-500 bg-slate-50 px-3 py-2 text-[11px]">
                   <Reply className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -1094,7 +1151,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
               )}
 
               {/* Media type selector toggle */}
-              <div className="flex items-center gap-2 text-[11px]">
+              <div className={`flex items-center gap-2 text-[11px] ${selectedSession.isBlocked ? 'pointer-events-none opacity-50' : ''}`}>
                 <button
                   type="button"
                   onClick={() => setAgentMediaType('text')}
@@ -1133,7 +1190,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
               </div>
 
               {/* Form depending on media type */}
-              <form onSubmit={handleSendAgentMessage} className="space-y-2">
+              <form onSubmit={handleSendAgentMessage} className={`space-y-2 ${selectedSession.isBlocked ? 'pointer-events-none opacity-50' : ''}`}>
                 {agentMediaType === 'text' ? (
                   <div className="flex items-center gap-2">
                     <input

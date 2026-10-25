@@ -47,6 +47,10 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [savingAccountName, setSavingAccountName] = useState(false);
+  const [registrationAccountId, setRegistrationAccountId] = useState<string | null>(null);
+  const [registrationPin, setRegistrationPin] = useState('');
+  const [isRegisteringName, setIsRegisteringName] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // New account form state
   const [formData, setFormData] = useState({
@@ -180,6 +184,36 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
     }
   };
 
+  const handleRegisterApprovedName = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!registrationAccountId) return;
+    if (!/^\d{6}$/.test(registrationPin)) {
+      setError('Informe o PIN de 6 dígitos da verificação em duas etapas.');
+      return;
+    }
+
+    setIsRegisteringName(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/accounts/${registrationAccountId}/register-approved-name`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registrationPin }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error([data.error, data.diagnosticTip].filter(Boolean).join(' ') || 'Não foi possível registrar o nome aprovado.');
+      setNotice(data.message || 'Nome aprovado registrado na Meta com sucesso.');
+      setRegistrationAccountId(null);
+      setRegistrationPin('');
+      onRefreshAccounts();
+    } catch (err: any) {
+      setError(err.message || 'Erro ao registrar o nome aprovado na Meta.');
+    } finally {
+      setIsRegisteringName(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -212,6 +246,11 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
           {error && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
               {error}
+            </div>
+          )}
+          {notice && (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs">
+              {notice}
             </div>
           )}
 
@@ -349,6 +388,20 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                           <Pencil className="w-4 h-4" />
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setRegistrationAccountId(acc.id);
+                          setRegistrationPin('');
+                          setError(null);
+                          setNotice(null);
+                        }}
+                        title="Registrar novamente na Meta depois que o novo nome de exibição for aprovado"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50 cursor-pointer transition-colors"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                      </button>
                       {!acc.isDefault && (
                         <button
                           type="button"
@@ -375,6 +428,60 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                 );
               })}
             </div>
+
+            {registrationAccountId && (() => {
+              const account = accounts.find((item) => item.id === registrationAccountId);
+              if (!account) return null;
+              return (
+                <form onSubmit={handleRegisterApprovedName} className="mt-3 rounded-xl border border-blue-200 bg-blue-50/60 p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="font-bold text-blue-950">Registrar nome aprovado na Meta</h4>
+                      <p className="mt-1 text-[11px] leading-relaxed text-blue-800">
+                        Use esta ação somente depois que o novo nome de exibição de <strong>{account.name}</strong> aparecer como aprovado no WhatsApp Manager.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRegistrationAccountId(null);
+                        setRegistrationPin('');
+                      }}
+                      className="rounded-lg p-1 text-blue-500 hover:bg-blue-100 hover:text-blue-800"
+                      title="Cancelar"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <label className="flex-1 font-semibold text-slate-700">
+                      PIN da verificação em duas etapas
+                      <input
+                        autoFocus
+                        type="password"
+                        inputMode="numeric"
+                        pattern="[0-9]{6}"
+                        maxLength={6}
+                        autoComplete="new-password"
+                        value={registrationPin}
+                        onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="6 dígitos"
+                        className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 font-mono text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={isRegisteringName || registrationPin.length !== 6}
+                      className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isRegisteringName ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                      Registrar nome aprovado
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-blue-700">O PIN é enviado somente nesta chamada e não é armazenado pelo FluxoZap.</p>
+                </form>
+              );
+            })()}
           </div>
 
           {/* Form to add a new WhatsApp number */}

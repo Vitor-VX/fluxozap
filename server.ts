@@ -20,6 +20,10 @@ import {
 } from './src/services/saleMusicSettings';
 import { verifySaleNotificationTestSignature } from './src/services/saleNotificationTestAuth';
 import {
+  buildWhatsAppBlockUsersPayload,
+  isValidWhatsAppRegistrationPin,
+} from './src/services/whatsappContactManagement';
+import {
   buildPaymentBranchTargets,
   canStartFlowFromInboundMessage,
   DURABLE_EXECUTION_CHECKPOINT_VERSION,
@@ -697,6 +701,8 @@ interface SessionData {
     receivedAt: string;
   };
   botPaused?: boolean;
+  isBlocked?: boolean;
+  blockedAt?: string;
   flowCompleted?: boolean;
   autoDeleteDays?: number;
   autoDeleteAt?: string;
@@ -1923,8 +1929,9 @@ async function executeFlowSteps(
   isLiveWhatsApp: boolean = false,
   allowPaymentPending: boolean = false
 ): Promise<{ executionErrors: string[]; lastLog?: ApiLogEntry }> {
-  // If bot is paused for this customer, do not execute automated bot steps
-  if (session.botPaused) {
+  // A blocked contact must never receive automated messages, including durable
+  // resumptions and payment branches that may fire after the block request.
+  if (session.isBlocked || session.botPaused) {
     return { executionErrors: [] };
   }
 
@@ -4291,6 +4298,65 @@ async function startServer() {
     return responseBody;
   }
 
+  async function setWhatsAppUserBlocked(input: {
+    account: WhatsAppAccount;
+    phoneNumber: string;
+    blocked: boolean;
+  }): Promise<any> {
+    const accessToken = String(input.account.accessToken || metaConfig.accessToken || '').trim();
+    if (!input.account.phoneNumberId) {
+      const error: any = new Error('A linha selecionada não possui um Meta Phone Number ID configurado.');
+      error.status = 400;
+      throw error;
+    }
+    if (!accessToken) {
+      const error: any = new Error('A linha selecionada não possui um Access Token válido da Meta.');
+      error.status = 400;
+      throw error;
+    }
+
+    const requestPayload = buildWhatsAppBlockUsersPayload(input.phoneNumber);
+    const endpoint = `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${encodeURIComponent(input.account.phoneNumberId)}/block_users`;
+    const response = await fetch(endpoint, {
+      method: input.blocked ? 'POST' : 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestPayload),
+    });
+    const responseBody: any = await response.json().catch(() => ({}));
+    const diagnostic = analyzeMetaError(response.status, responseBody);
+    addApiLog({
+      type: 'integration',
+      direction: 'outbound',
+      endpoint: `${input.blocked ? 'POST' : 'DELETE'} /${META_GRAPH_API_VERSION}/${input.account.phoneNumberId}/block_users`,
+      accountId: input.account.id,
+      accountName: input.account.name,
+      phoneNumberId: input.account.phoneNumberId,
+      recipient: input.phoneNumber.replace(/\D/g, ''),
+      messageType: input.blocked ? 'block_whatsapp_user' : 'unblock_whatsapp_user',
+      httpStatus: response.status,
+      success: response.ok,
+      requestPayload,
+      responseBody,
+      metaErrorCode: diagnostic.code,
+      metaErrorSubcode: diagnostic.subcode,
+      metaErrorMessage: response.ok ? undefined : diagnostic.message,
+      metaErrorType: diagnostic.type,
+      metaFbTraceId: diagnostic.fbtrace_id,
+      diagnosticTip: response.ok ? undefined : diagnostic.tip,
+    });
+    if (!response.ok) {
+      const error: any = new Error(`A Meta não conseguiu ${input.blocked ? 'bloquear' : 'desbloquear'} o contato: ${diagnostic.message}`);
+      error.status = response.status >= 400 && response.status < 500 ? response.status : 502;
+      error.meta = responseBody?.error;
+      error.diagnosticTip = diagnostic.tip;
+      throw error;
+    }
+    return responseBody;
+  }
+
   // API: Multiple WhatsApp Accounts / Phone Numbers Management
   app.get('/api/accounts', (_req: Request, res: Response) => {
     res.json(whatsappAccounts.map(({ flow: _flow, ...account }) => account));
@@ -4363,6 +4429,44 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(err.status || 500).json({ success: false, error: err.message, meta: err.meta, diagnosticTip: err.diagnosticTip });
+    }
+  });
+
+  app.post('/api/accounts/:id/register-approved-name', async (req: Request, res: Response) => {
+    try {
+      const account = whatsappAccounts.find((item) => item.id === req.params.id);
+      if (!account) return res.status(404).json({ success: false, error: 'Número não encontrado.' });
+
+      const registrationPin = String(req.body?.registrationPin || '').trim();
+      if (!isValidWhatsAppRegistrationPin(registrationPin)) {
+        return res.status(400).json({ success: false, error: 'Informe o PIN de 6 dígitos da verificação em duas etapas.' });
+      }
+      const accessToken = String(account.accessToken || metaConfig.accessToken || '').trim();
+      if (!accessToken) {
+        return res.status(400).json({ success: false, error: 'Configure um Access Token para esta linha antes de registrar o nome aprovado.' });
+      }
+
+      await registerWhatsAppPhoneNumber({
+        phoneNumberId: account.phoneNumberId,
+        accessToken,
+        pin: registrationPin,
+        accountName: account.name,
+      });
+      account.registrationStatus = 'registered';
+      account.updatedAt = new Date().toISOString();
+      saveAccountsToFile();
+      res.json({
+        success: true,
+        message: `O nome aprovado da linha ${account.name} foi registrado novamente na Meta.`,
+        account,
+      });
+    } catch (err: any) {
+      res.status(err.status || 500).json({
+        success: false,
+        error: err.message,
+        meta: err.meta,
+        diagnosticTip: err.diagnosticTip,
+      });
     }
   });
 
@@ -4759,7 +4863,15 @@ async function startServer() {
               if (contactName && !session.name) {
                 session.name = contactName;
               }
-      refreshDefaultSessionVariables(session);
+              refreshDefaultSessionVariables(session);
+
+              // Meta normally suppresses messages from blocked users. This
+              // local guard also covers webhook deliveries already queued when
+              // the block was confirmed.
+              if (session.isBlocked) {
+                console.log(`[Meta Webhook] Mensagem ignorada porque ${from} está bloqueado na linha ${matchedAccount.name}.`);
+                continue;
+              }
 
               // Check if message came from Click-to-WhatsApp Facebook/Meta Ads (72-hour window!)
               const referral = msg.referral;
@@ -4989,6 +5101,9 @@ async function startServer() {
     const account = whatsappAccounts.find((item) => item.id === accountId);
     if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
     const session = getOrCreateSession(cleanPhone, account.id);
+    if (session.isBlocked) {
+      return res.status(409).json({ success: false, error: 'Este contato está bloqueado. Desbloqueie-o antes de enviar mensagens.' });
+    }
     const accountCredentials = {
       id: account.id,
       name: account.name,
@@ -5048,6 +5163,35 @@ async function startServer() {
       res.json({ success: true, session });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sessions/:phoneNumber/block-status', async (req: Request, res: Response) => {
+    const { phoneNumber } = req.params;
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const account = whatsappAccounts.find((item) => item.id === req.body?.accountId);
+    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
+    const session = getOrCreateSession(cleanPhone, account.id);
+    const blocked = req.body?.blocked === true;
+
+    try {
+      await setWhatsAppUserBlocked({ account, phoneNumber: cleanPhone, blocked });
+      session.isBlocked = blocked;
+      session.blockedAt = blocked ? new Date().toISOString() : undefined;
+      session.updatedAt = new Date().toISOString();
+      await persistSession(session);
+      res.json({
+        success: true,
+        message: blocked ? 'Contato bloqueado na Meta e no FluxoZap.' : 'Contato desbloqueado na Meta e no FluxoZap.',
+        session,
+      });
+    } catch (err: any) {
+      res.status(err.status || 500).json({
+        success: false,
+        error: err.message,
+        meta: err.meta,
+        diagnosticTip: err.diagnosticTip,
+      });
     }
   });
 

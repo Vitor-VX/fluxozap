@@ -219,6 +219,8 @@ export interface UserSession {
 
   // Bot management
   botPaused?: boolean; // Human agent paused the automated bot
+  isBlocked?: boolean; // Bloqueado na linha correspondente pela Cloud API
+  blockedAt?: string;
   flowCompleted?: boolean;
   status?: 'active' | 'paused' | 'completed' | 'archived';
 
