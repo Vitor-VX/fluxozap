@@ -5305,21 +5305,48 @@ async function startServer() {
     if (accountId && accountId !== 'all') {
       list = list.filter((s) => s.accountId === accountId);
     }
-    list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    const sessionListKey = (session: SessionData) => `${session.accountId || ''}:${session.phoneNumber}`;
+    list.sort((a, b) => {
+      const timestampDifference = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      return timestampDifference || sessionListKey(a).localeCompare(sessionListKey(b));
+    });
     const paginationRequested = req.query.limit !== undefined || req.query.offset !== undefined;
     if (!paginationRequested) return res.json(list);
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
-    const pageItems = list.slice(offset, offset + limit);
+    const rawCursor = String(req.query.cursor || '');
+    let cursor: { updatedAt: string; key: string } | null = null;
+    if (rawCursor) {
+      try {
+        const parsed = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8'));
+        if (typeof parsed?.updatedAt === 'string' && typeof parsed?.key === 'string') cursor = parsed;
+      } catch {
+        return res.status(400).json({ error: 'Cursor de conversas inválido.' });
+      }
+    }
+    const cursorTimestamp = cursor ? new Date(cursor.updatedAt).getTime() : 0;
+    const remainingItems = cursor
+      ? list.filter((session) => {
+          const timestamp = new Date(session.updatedAt).getTime();
+          return timestamp < cursorTimestamp || (timestamp === cursorTimestamp && sessionListKey(session) > cursor.key);
+        })
+      : list.slice(offset);
+    const pageItems = remainingItems.slice(0, limit);
     const nextOffset = offset + pageItems.length;
+    const hasMore = pageItems.length < remainingItems.length;
+    const lastItem = pageItems[pageItems.length - 1];
+    const nextCursor = hasMore && lastItem
+      ? Buffer.from(JSON.stringify({ updatedAt: lastItem.updatedAt, key: sessionListKey(lastItem) }), 'utf8').toString('base64url')
+      : null;
     res.json({
       sessions: pageItems,
       pagination: {
         offset,
         limit,
         total: list.length,
-        hasMore: nextOffset < list.length,
+        hasMore,
         nextOffset,
+        nextCursor,
       },
     });
   });

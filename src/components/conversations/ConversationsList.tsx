@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   Users,
   Phone,
@@ -55,6 +55,20 @@ interface PendingMediaUpload {
 
 const CONVERSATIONS_PAGE_SIZE = 30;
 
+interface SessionsPagination {
+  total: number;
+  hasMore: boolean;
+  nextOffset: number;
+  nextCursor?: string | null;
+}
+
+const EMPTY_SESSIONS_PAGINATION: SessionsPagination = {
+  total: 0,
+  hasMore: false,
+  nextOffset: 0,
+  nextCursor: null,
+};
+
 const BRASILIA_TIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo',
   hour: '2-digit',
@@ -97,7 +111,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   onConversationTargetHandled,
 }) => {
   const [sessions, setSessions] = useState<UserSession[]>([]);
-  const [sessionsPagination, setSessionsPagination] = useState({ total: 0, hasMore: false, nextOffset: 0 });
+  const [sessionsPagination, setSessionsPagination] = useState<SessionsPagination>(EMPTY_SESSIONS_PAGINATION);
   const [selectedSession, setSelectedSession] = useState<UserSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMoreSessions, setIsLoadingMoreSessions] = useState(false);
@@ -106,6 +120,10 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   const [showCollectedVariables, setShowCollectedVariables] = useState(false);
   const activeAccountRef = useRef(activeAccountId);
   const loadedSessionsLimitRef = useRef(CONVERSATIONS_PAGE_SIZE);
+  const sessionsRef = useRef<UserSession[]>([]);
+  const sessionsPaginationRef = useRef<SessionsPagination>(EMPTY_SESSIONS_PAGINATION);
+  const sessionsRequestIdRef = useRef(0);
+  const isLoadingMoreSessionsRef = useRef(false);
   const contactListScrollRef = useRef<HTMLDivElement>(null);
   const pendingContactScrollTopRef = useRef<number | null>(null);
 
@@ -138,35 +156,63 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     accountId: string | undefined = activeAccountId,
     options: { append?: boolean; reset?: boolean } = {}
   ) => {
+    const append = options.append === true;
+    if (append && isLoadingMoreSessionsRef.current) return;
+    // A background refresh must never race a page request and replace the
+    // expanded list with the smaller snapshot it requested earlier.
+    if (!append && silent && isLoadingMoreSessionsRef.current) return;
+
+    const requestId = ++sessionsRequestIdRef.current;
     if (!silent) setIsLoading(true);
-    if (options.append) setIsLoadingMoreSessions(true);
+    if (append) {
+      isLoadingMoreSessionsRef.current = true;
+      setIsLoadingMoreSessions(true);
+    }
     try {
       if (!accountId) {
+        sessionsRef.current = [];
+        sessionsPaginationRef.current = EMPTY_SESSIONS_PAGINATION;
         setSessions([]);
-        setSessionsPagination({ total: 0, hasMore: false, nextOffset: 0 });
+        setSessionsPagination(EMPTY_SESSIONS_PAGINATION);
         setSelectedSession(null);
         return;
       }
-      const append = options.append === true;
-      const offset = append ? sessions.length : 0;
+      const currentPagination = sessionsPaginationRef.current;
+      const offset = append ? currentPagination.nextOffset : 0;
       const limit = append
         ? CONVERSATIONS_PAGE_SIZE
         : options.reset
           ? CONVERSATIONS_PAGE_SIZE
           : Math.max(CONVERSATIONS_PAGE_SIZE, loadedSessionsLimitRef.current);
-      pendingContactScrollTopRef.current = options.reset ? 0 : (contactListScrollRef.current?.scrollTop ?? 0);
+      if (options.reset) {
+        pendingContactScrollTopRef.current = 0;
+      } else if (append) {
+        pendingContactScrollTopRef.current = contactListScrollRef.current?.scrollTop ?? 0;
+      }
       const params = new URLSearchParams({ accountId, offset: String(offset), limit: String(limit) });
+      if (append && currentPagination.nextCursor) params.set('cursor', currentPagination.nextCursor);
       const res = await fetch(`/api/sessions?${params.toString()}`);
       if (res.ok) {
-        const payload: { sessions: UserSession[]; pagination: { total: number; hasMore: boolean; nextOffset: number } } = await res.json();
-        if (activeAccountRef.current !== accountId) return;
+        const payload: { sessions: UserSession[]; pagination: SessionsPagination } = await res.json();
+        // Ignore any response superseded by a newer refresh/page request.
+        if (activeAccountRef.current !== accountId || requestId !== sessionsRequestIdRef.current) return;
         const data = payload.sessions || [];
         const nextSessions = append
-          ? Array.from(new Map([...sessions, ...data].map((session) => [`${session.accountId}:${session.phoneNumber}`, session])).values())
+          ? Array.from(new Map([...sessionsRef.current, ...data].map((session) => [`${session.accountId}:${session.phoneNumber}`, session])).values())
           : data;
-        loadedSessionsLimitRef.current = Math.max(CONVERSATIONS_PAGE_SIZE, nextSessions.length);
+        const nextPagination = payload.pagination || {
+          total: nextSessions.length,
+          hasMore: false,
+          nextOffset: nextSessions.length,
+          nextCursor: null,
+        };
+        loadedSessionsLimitRef.current = options.reset
+          ? CONVERSATIONS_PAGE_SIZE
+          : Math.max(loadedSessionsLimitRef.current, nextSessions.length);
+        sessionsRef.current = nextSessions;
+        sessionsPaginationRef.current = nextPagination;
         setSessions(nextSessions);
-        setSessionsPagination(payload.pagination || { total: nextSessions.length, hasMore: false, nextOffset: nextSessions.length });
+        setSessionsPagination(nextPagination);
 
         // Never carry a chat from one WhatsApp line into another line's context.
         setSelectedSession((prev) => {
@@ -178,25 +224,31 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       console.error('Error fetching sessions:', err);
     } finally {
       if (!silent) setIsLoading(false);
-      if (options.append) setIsLoadingMoreSessions(false);
+      if (append) {
+        isLoadingMoreSessionsRef.current = false;
+        setIsLoadingMoreSessions(false);
+      }
     }
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (pendingContactScrollTopRef.current === null) return;
     const scrollTop = pendingContactScrollTopRef.current;
     pendingContactScrollTopRef.current = null;
-    requestAnimationFrame(() => {
-      if (contactListScrollRef.current) contactListScrollRef.current.scrollTop = scrollTop;
-    });
+    if (contactListScrollRef.current) contactListScrollRef.current.scrollTop = scrollTop;
   }, [sessions]);
 
   useEffect(() => {
+    // Invalidate requests from the previously selected WhatsApp line.
+    sessionsRequestIdRef.current += 1;
     activeAccountRef.current = activeAccountId;
     loadedSessionsLimitRef.current = CONVERSATIONS_PAGE_SIZE;
+    sessionsRef.current = [];
+    sessionsPaginationRef.current = EMPTY_SESSIONS_PAGINATION;
+    isLoadingMoreSessionsRef.current = false;
     pendingContactScrollTopRef.current = 0;
     setSessions([]);
-    setSessionsPagination({ total: 0, hasMore: false, nextOffset: 0 });
+    setSessionsPagination(EMPTY_SESSIONS_PAGINATION);
     setSelectedSession(null);
     setShowCollectedVariables(false);
     setAgentText('');
