@@ -62,11 +62,25 @@ interface SessionsPagination {
   nextCursor?: string | null;
 }
 
+interface MessagesPagination {
+  total: number;
+  loaded: number;
+  hasMore: boolean;
+  nextLimit: number;
+}
+
 const EMPTY_SESSIONS_PAGINATION: SessionsPagination = {
   total: 0,
   hasMore: false,
   nextOffset: 0,
   nextCursor: null,
+};
+
+const EMPTY_MESSAGES_PAGINATION: MessagesPagination = {
+  total: 0,
+  loaded: 0,
+  hasMore: false,
+  nextLimit: 50,
 };
 
 const BRASILIA_TIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
@@ -113,8 +127,11 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [sessionsPagination, setSessionsPagination] = useState<SessionsPagination>(EMPTY_SESSIONS_PAGINATION);
   const [selectedSession, setSelectedSession] = useState<UserSession | null>(null);
+  const [messagesPagination, setMessagesPagination] = useState<MessagesPagination>(EMPTY_MESSAGES_PAGINATION);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMoreSessions, setIsLoadingMoreSessions] = useState(false);
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'ads' | 'open_window' | 'paused'>('all');
   const [showCollectedVariables, setShowCollectedVariables] = useState(false);
@@ -124,8 +141,12 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
   const sessionsPaginationRef = useRef<SessionsPagination>(EMPTY_SESSIONS_PAGINATION);
   const sessionsRequestIdRef = useRef(0);
   const isLoadingMoreSessionsRef = useRef(false);
+  const selectedConversationRequestIdRef = useRef(0);
+  const selectedConversationLoadingRef = useRef(false);
+  const loadedMessagesLimitRef = useRef(50);
   const contactListScrollRef = useRef<HTMLDivElement>(null);
   const pendingContactScrollTopRef = useRef<number | null>(null);
+  const pendingChatScrollPositionRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   // Agent chat input state
   const [agentText, setAgentText] = useState('');
@@ -217,7 +238,8 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
         // Never carry a chat from one WhatsApp line into another line's context.
         setSelectedSession((prev) => {
           if (!prev || prev.accountId !== accountId) return null;
-          return nextSessions.find((s) => s.phoneNumber === prev.phoneNumber && s.accountId === accountId) || prev;
+          const summary = nextSessions.find((s) => s.phoneNumber === prev.phoneNumber && s.accountId === accountId);
+          return summary ? { ...prev, ...summary, variables: prev.variables, history: prev.history } : prev;
         });
       }
     } catch (err) {
@@ -231,6 +253,95 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     }
   };
 
+  const fetchConversation = async (
+    summary: UserSession,
+    options: { silent?: boolean; messageLimit?: number; loadingOlder?: boolean } = {}
+  ) => {
+    const accountId = summary.accountId;
+    if (!accountId) return;
+    if (options.silent && selectedConversationLoadingRef.current) return;
+
+    const requestId = ++selectedConversationRequestIdRef.current;
+    selectedConversationLoadingRef.current = true;
+    if (options.loadingOlder) {
+      setIsLoadingOlderMessages(true);
+    } else if (!options.silent) {
+      setIsLoadingConversation(true);
+    }
+
+    try {
+      const messageLimit = options.messageLimit || loadedMessagesLimitRef.current;
+      const params = new URLSearchParams({ accountId, messageLimit: String(messageLimit) });
+      const response = await fetch(`/api/sessions/${encodeURIComponent(summary.phoneNumber)}?${params.toString()}`);
+      const payload: { session?: UserSession; pagination?: MessagesPagination; error?: string } = await response.json();
+      if (!response.ok || !payload.session) throw new Error(payload.error || 'Não foi possível carregar a conversa.');
+      if (activeAccountRef.current !== accountId || requestId !== selectedConversationRequestIdRef.current) return;
+
+      loadedMessagesLimitRef.current = payload.pagination?.loaded || payload.session.history.length || 50;
+      setSelectedSession(payload.session);
+      setMessagesPagination(payload.pagination || {
+        total: payload.session.history.length,
+        loaded: payload.session.history.length,
+        hasMore: false,
+        nextLimit: payload.session.history.length + 50,
+      });
+    } catch (error: any) {
+      if (requestId === selectedConversationRequestIdRef.current) {
+        setSendError(error.message || 'Não foi possível carregar a conversa.');
+      }
+    } finally {
+      if (requestId === selectedConversationRequestIdRef.current) {
+        selectedConversationLoadingRef.current = false;
+        setIsLoadingConversation(false);
+        setIsLoadingOlderMessages(false);
+      }
+    }
+  };
+
+  const handleSelectSession = (summary: UserSession) => {
+    const isSameConversation = selectedSession?.accountId === summary.accountId
+      && selectedSession?.phoneNumber === summary.phoneNumber;
+    shouldStickToBottomRef.current = true;
+    setReplyingTo(null);
+    setShowCollectedVariables(false);
+    setSendError(null);
+    if (!isSameConversation) {
+      loadedMessagesLimitRef.current = 50;
+      setMessagesPagination(EMPTY_MESSAGES_PAGINATION);
+      setSelectedSession({ ...summary, history: [] });
+    }
+    void fetchConversation(summary, { messageLimit: isSameConversation ? loadedMessagesLimitRef.current : 50 });
+  };
+
+  const applyCompleteSession = (session: UserSession) => {
+    const loaded = session.history.length;
+    loadedMessagesLimitRef.current = Math.max(50, loaded);
+    setSelectedSession(session);
+    setMessagesPagination({
+      total: loaded,
+      loaded,
+      hasMore: false,
+      nextLimit: loaded + 50,
+    });
+  };
+
+  const handleLoadOlderMessages = () => {
+    if (!selectedSession || isLoadingOlderMessages) return;
+    const container = chatScrollRef.current;
+    if (container) {
+      pendingChatScrollPositionRef.current = {
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+      };
+    }
+    shouldStickToBottomRef.current = false;
+    loadedMessagesLimitRef.current = messagesPagination.nextLimit;
+    void fetchConversation(selectedSession, {
+      messageLimit: messagesPagination.nextLimit,
+      loadingOlder: true,
+    });
+  };
+
   useLayoutEffect(() => {
     if (pendingContactScrollTopRef.current === null) return;
     const scrollTop = pendingContactScrollTopRef.current;
@@ -238,18 +349,32 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     if (contactListScrollRef.current) contactListScrollRef.current.scrollTop = scrollTop;
   }, [sessions]);
 
+  useLayoutEffect(() => {
+    const pending = pendingChatScrollPositionRef.current;
+    const container = chatScrollRef.current;
+    if (!pending || !container) return;
+    pendingChatScrollPositionRef.current = null;
+    container.scrollTop = pending.scrollTop + (container.scrollHeight - pending.scrollHeight);
+  }, [selectedSession?.history.length]);
+
   useEffect(() => {
     // Invalidate requests from the previously selected WhatsApp line.
     sessionsRequestIdRef.current += 1;
+    selectedConversationRequestIdRef.current += 1;
     activeAccountRef.current = activeAccountId;
     loadedSessionsLimitRef.current = CONVERSATIONS_PAGE_SIZE;
     sessionsRef.current = [];
     sessionsPaginationRef.current = EMPTY_SESSIONS_PAGINATION;
     isLoadingMoreSessionsRef.current = false;
+    selectedConversationLoadingRef.current = false;
+    loadedMessagesLimitRef.current = 50;
     pendingContactScrollTopRef.current = 0;
     setSessions([]);
     setSessionsPagination(EMPTY_SESSIONS_PAGINATION);
     setSelectedSession(null);
+    setMessagesPagination(EMPTY_MESSAGES_PAGINATION);
+    setIsLoadingConversation(false);
+    setIsLoadingOlderMessages(false);
     setShowCollectedVariables(false);
     setAgentText('');
     setPendingMediaUploads((current) => {
@@ -270,11 +395,18 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     const cleanTarget = openConversationTarget.phoneNumber.replace(/\D/g, '');
     const targetSession = sessions.find((session) => session.phoneNumber.replace(/\D/g, '') === cleanTarget);
     if (!targetSession) return;
-    shouldStickToBottomRef.current = true;
-    setSelectedSession(targetSession);
-    setReplyingTo(null);
+    handleSelectSession(targetSession);
     onConversationTargetHandled?.();
   }, [activeAccountId, openConversationTarget, onConversationTargetHandled, sessions]);
+
+  useEffect(() => {
+    if (!selectedSession?.accountId || !selectedSession.phoneNumber) return;
+    const summary = selectedSession;
+    const interval = window.setInterval(() => {
+      void fetchConversation(summary, { silent: true, messageLimit: loadedMessagesLimitRef.current });
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, [selectedSession?.accountId, selectedSession?.phoneNumber]);
 
   useEffect(() => {
     if (!selectedSession) return;
@@ -370,7 +502,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       }
 
       if (latestSession) {
-        setSelectedSession(latestSession);
+        applyCompleteSession(latestSession);
         setAgentText('');
         pendingMediaUploads.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
         setPendingMediaUploads([]);
@@ -398,7 +530,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       });
       if (res.ok) {
         const data = await res.json();
-        setSelectedSession(data.session);
+        applyCompleteSession(data.session);
         fetchSessions(true);
       }
     } catch (err) {
@@ -474,7 +606,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       });
       if (res.ok) {
         const data = await res.json();
-        setSelectedSession(data.session);
+        applyCompleteSession(data.session);
         setFlowRestoredNotice(
           triggerNow
             ? 'Funil reiniciado e primeira mensagem disparada com sucesso!'
@@ -520,7 +652,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       });
       if (res.ok) {
         const data = await res.json();
-        setSelectedSession(data.session);
+        applyCompleteSession(data.session);
         fetchSessions(true);
       }
     } catch (err) {
@@ -547,7 +679,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       });
       const data = await res.json();
       if (!res.ok) throw new Error([data.error, data.diagnosticTip].filter(Boolean).join(' ') || `Não foi possível ${nextBlocked ? 'bloquear' : 'desbloquear'} o contato.`);
-      setSelectedSession(data.session);
+      applyCompleteSession(data.session);
       await fetchSessions(true);
     } catch (err: any) {
       setSendError(err.message || 'Erro ao atualizar o bloqueio do contato.');
@@ -741,12 +873,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                 <button
                   key={`${item.accountId || 'unassigned'}::${item.phoneNumber}`}
                   type="button"
-                  onClick={() => {
-                    shouldStickToBottomRef.current = true;
-                    setSelectedSession(item);
-                    setReplyingTo(null);
-                    setShowCollectedVariables(false);
-                  }}
+                  onClick={() => handleSelectSession(item)}
                   className={`w-full text-left p-3 hover:bg-slate-50 transition-colors flex items-start gap-3 cursor-pointer ${
                     isSelected ? 'bg-emerald-50/70 border-r-2 border-emerald-600' : ''
                   }`}
@@ -1023,7 +1150,24 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
               }}
               className="flex-1 overflow-y-auto p-6 space-y-3.5 bg-[#efeae2]/70"
             >
-              {selectedSession.history.length === 0 ? (
+              {messagesPagination.hasMore && !isLoadingConversation && (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleLoadOlderMessages}
+                    disabled={isLoadingOlderMessages}
+                    className="rounded-full border border-slate-300 bg-white/90 px-4 py-1.5 text-[11px] font-bold text-slate-600 shadow-xs hover:bg-white disabled:opacity-50"
+                  >
+                    {isLoadingOlderMessages ? 'Carregando mensagens...' : 'Carregar mensagens anteriores'}
+                  </button>
+                </div>
+              )}
+              {isLoadingConversation ? (
+                <div className="flex h-full min-h-48 items-center justify-center text-slate-500">
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  <span className="text-xs font-semibold">Carregando conversa...</span>
+                </div>
+              ) : selectedSession.history.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 max-w-sm mx-auto bg-white/80 rounded-2xl border border-slate-200/80">
                   <MessageSquare className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                   <p className="font-bold text-slate-700">Sem mensagens nesta conversa</p>

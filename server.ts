@@ -5295,6 +5295,32 @@ async function startServer() {
     res.json({ success: true, message: 'Limpeza de conversas expiradas concluída.' });
   });
 
+  // API: Load one conversation on demand. The contacts endpoint intentionally
+  // returns summaries only so it never transfers every transcript in the list.
+  app.get('/api/sessions/:phoneNumber', (req: Request, res: Response) => {
+    const cleanPhone = req.params.phoneNumber.replace(/\D/g, '');
+    const accountId = String(req.query.accountId || '');
+    const account = whatsappAccounts.find((item) => item.id === accountId);
+    if (!account) return res.status(404).json({ error: 'Linha do WhatsApp não encontrada.' });
+
+    const session = sessions.get(sessionStorageKey(account.id, cleanPhone));
+    if (!session) return res.status(404).json({ error: 'Conversa não encontrada.' });
+
+    const requestedMessageLimit = Math.max(1, Number(req.query.messageLimit) || 50);
+    const messageLimit = Math.min(500, requestedMessageLimit);
+    const totalMessages = session.history.length;
+    const history = session.history.slice(-messageLimit);
+    res.json({
+      session: { ...updateWindowState(session), history },
+      pagination: {
+        total: totalMessages,
+        loaded: history.length,
+        hasMore: history.length < totalMessages,
+        nextLimit: Math.min(500, history.length + 50),
+      },
+    });
+  });
+
   // API: Get active sessions / contacts with optional server-side pagination.
   app.get('/api/sessions', (req: Request, res: Response) => {
     const accountId = req.query.accountId as string;
@@ -5332,6 +5358,14 @@ async function startServer() {
         })
       : list.slice(offset);
     const pageItems = remainingItems.slice(0, limit);
+    const sessionSummaries = pageItems.map((session) => {
+      const lastMessage = session.history[session.history.length - 1];
+      return {
+        ...session,
+        variables: session.variables?.nome ? { nome: session.variables.nome } : {},
+        history: lastMessage ? [lastMessage] : [],
+      };
+    });
     const nextOffset = offset + pageItems.length;
     const hasMore = pageItems.length < remainingItems.length;
     const lastItem = pageItems[pageItems.length - 1];
@@ -5339,7 +5373,7 @@ async function startServer() {
       ? Buffer.from(JSON.stringify({ updatedAt: lastItem.updatedAt, key: sessionListKey(lastItem) }), 'utf8').toString('base64url')
       : null;
     res.json({
-      sessions: pageItems,
+      sessions: sessionSummaries,
       pagination: {
         offset,
         limit,
