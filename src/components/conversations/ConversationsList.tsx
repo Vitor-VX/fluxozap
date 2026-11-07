@@ -538,7 +538,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     }
   };
 
-  // Upload outgoing files directly to Meta. Nothing is persisted in R2/local storage.
+  // UazAPI sends media by URL/base64, so computer uploads are persisted in R2.
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -555,10 +555,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
     try {
       const uploaded: PendingMediaUpload[] = [];
       for (const file of files) {
-        const useR2 = agentMediaType === 'audio' && agentAudioStorage === 'r2';
-        const uploadParams = new URLSearchParams({ accountId: activeAccountId || '' });
-        if (agentMediaType === 'audio') uploadParams.set('voice', 'true');
-        const uploadUrl = useR2 ? '/api/r2/media' : `/api/meta/media?${uploadParams.toString()}`;
+        const uploadUrl = '/api/r2/media';
         const res = await fetch(uploadUrl, {
           method: 'POST',
           headers: {
@@ -571,14 +568,14 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
         const raw = await res.text();
         let data: any = {};
         try { data = JSON.parse(raw); } catch { data = { error: raw }; }
-        const uploadedReference = useR2 ? data.mediaUrl : data.mediaId;
-        if (!res.ok || !uploadedReference) throw new Error(data.error || `${useR2 ? 'O Cloudflare R2' : 'A Meta'} recusou o upload de ${file.name}.`);
+        const uploadedReference = data.mediaUrl;
+        if (!res.ok || !uploadedReference) throw new Error(data.error || `O Cloudflare R2 recusou o upload de ${file.name}.`);
         uploaded.push({
           key: `${uploadedReference}_${file.name}`,
           type: agentMediaType === 'audio' ? 'audio' : file.type.startsWith('image/') ? 'image' : 'document',
-          storage: useR2 ? 'r2' : 'meta',
-          mediaId: useR2 ? undefined : data.mediaId,
-          mediaUrl: useR2 ? data.mediaUrl : undefined,
+          storage: 'r2',
+          mediaId: undefined,
+          mediaUrl: data.mediaUrl,
           mediaMimeType: data.mimeType || file.type,
           filename: data.filename || file.name,
           previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
@@ -586,7 +583,7 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
       }
       setPendingMediaUploads((current) => [...current, ...uploaded]);
     } catch (err: any) {
-      setSendError(err.message || `Falha no upload para ${agentMediaType === 'audio' && agentAudioStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}.`);
+      setSendError(err.message || 'Falha no upload para o Cloudflare R2.');
     } finally {
       setIsUploadingFile(false);
       e.target.value = '';
@@ -1435,26 +1432,11 @@ export const ConversationsList: React.FC<ConversationsListProps> = ({
                     {agentMediaType === 'audio' && (
                       <div className="rounded-lg border border-slate-200 bg-white p-2.5">
                         <p className="mb-2 text-[11px] font-semibold text-slate-700">Destino do áudio do computador</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setAgentAudioStorage('meta')}
-                            className={`rounded-lg border px-3 py-2 text-[11px] font-semibold transition-colors ${agentAudioStorage === 'meta' ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-200' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-                          >
-                            Direto para Meta
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAgentAudioStorage('r2')}
-                            className={`rounded-lg border px-3 py-2 text-[11px] font-semibold transition-colors ${agentAudioStorage === 'r2' ? 'border-orange-500 bg-orange-50 text-orange-700 ring-1 ring-orange-200' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-                          >
-                            Cloudflare R2
-                          </button>
+                        <div className="rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-[11px] font-semibold text-orange-700">
+                          Cloudflare R2 → envio pela UazAPI
                         </div>
                         <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                          {agentAudioStorage === 'r2'
-                            ? 'O áudio ficará salvo no R2 e será enviado ao WhatsApp pela URL pública.'
-                            : 'O áudio será convertido em mensagem de voz e preparado diretamente na biblioteca da Meta.'}
+                          O áudio fica salvo no R2 e é enviado pela UazAPI como mensagem de voz.
                         </p>
                       </div>
                     )}

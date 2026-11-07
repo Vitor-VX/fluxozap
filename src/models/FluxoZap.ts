@@ -6,6 +6,7 @@ const ProjectConfigSchema = new Schema(
   {
     identifier: { type: String, required: true, unique: true, default: 'default', index: true },
     meta: { type: Schema.Types.Mixed, default: {} },
+    uazapi: { type: Schema.Types.Mixed, default: {} },
     r2: { type: Schema.Types.Mixed, default: {} },
     xpag: { type: Schema.Types.Mixed, default: {} },
     metaCapi: { type: Schema.Types.Mixed, default: {} },

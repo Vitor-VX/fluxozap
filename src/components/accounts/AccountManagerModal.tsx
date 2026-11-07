@@ -1,21 +1,8 @@
 import React, { useState } from 'react';
-import {
-  X,
-  Plus,
-  Trash2,
-  Check,
-  Smartphone,
-  ShieldCheck,
-  Star,
-  Copy,
-  ExternalLink,
-  Loader2,
-  Radio,
-  Pencil,
-} from 'lucide-react';
+import { Check, Loader2, Pencil, Plus, QrCode, Smartphone, Star, Trash2, X } from 'lucide-react';
 import { WhatsAppAccount } from '../../types/flow';
 
-interface AccountManagerModalProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
   accounts: WhatsAppAccount[];
@@ -24,650 +11,90 @@ interface AccountManagerModalProps {
   onRefreshAccounts: () => void;
 }
 
-const COLOR_OPTIONS = [
-  { id: 'emerald', bg: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
-  { id: 'blue', bg: 'bg-blue-50 text-blue-700 border-blue-300' },
-  { id: 'purple', bg: 'bg-purple-50 text-purple-700 border-purple-300' },
-  { id: 'amber', bg: 'bg-amber-50 text-amber-700 border-amber-300' },
-  { id: 'rose', bg: 'bg-rose-50 text-rose-700 border-rose-300' },
-  { id: 'indigo', bg: 'bg-indigo-50 text-indigo-700 border-indigo-300' },
-];
+const colors = ['emerald', 'blue', 'purple', 'amber', 'rose', 'indigo'];
 
-export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
-  isOpen,
-  onClose,
-  accounts,
-  activeAccountId,
-  onSelectAccount,
-  onRefreshAccounts,
-}) => {
-  const [isCreating, setIsCreating] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+export const AccountManagerModal: React.FC<Props> = ({ isOpen, onClose, accounts, activeAccountId, onSelectAccount, onRefreshAccounts }) => {
+  const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [name, setName] = useState('');
+  const [color, setColor] = useState('emerald');
+  const [editingId, setEditingId] = useState('');
   const [editingName, setEditingName] = useState('');
-  const [savingAccountName, setSavingAccountName] = useState(false);
-  const [registrationAccountId, setRegistrationAccountId] = useState<string | null>(null);
-  const [registrationPin, setRegistrationPin] = useState('');
-  const [isRegisteringName, setIsRegisteringName] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  // New account form state
-  const [formData, setFormData] = useState({
-    name: '',
-    phoneNumber: '',
-    phoneNumberId: '',
-    wabaId: '',
-    accessToken: '',
-    registrationPin: '',
-    color: 'emerald',
-    isDefault: false,
-  });
-
+  const [connectingId, setConnectingId] = useState('');
+  const [qrCode, setQrCode] = useState('');
+  const [qrAccountName, setQrAccountName] = useState('');
   if (!isOpen) return null;
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.name.trim() || !formData.phoneNumberId.trim() || !/^\d{6}$/.test(formData.registrationPin.trim())) {
-      setError('Informe o Nome, o Phone Number ID e o PIN de 6 dígitos da verificação em duas etapas.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault(); setSubmitting(true); setError(''); setNotice('');
     try {
-      const res = await fetch('/api/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setIsCreating(false);
-        setFormData({
-          name: '',
-          phoneNumber: '',
-          phoneNumberId: '',
-          wabaId: '',
-          accessToken: '',
-          registrationPin: '',
-          color: 'blue',
-          isDefault: false,
-        });
-        onRefreshAccounts();
-        if (data.account?.id) {
-          onSelectAccount(data.account.id);
-        }
-      } else {
-        setError([data.error, data.diagnosticTip].filter(Boolean).join(' ' ) || 'Erro ao cadastrar novo número de WhatsApp.');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Erro de conexão.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (accountId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (accounts.length <= 1) {
-      alert('Você precisa ter pelo menos um número de WhatsApp cadastrado.');
-      return;
-    }
-
-    if (!confirm('Tem certeza que deseja remover este número de WhatsApp e sua configuração?')) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/accounts/${accountId}`, { method: 'DELETE' });
-      if (res.ok) {
-        onRefreshAccounts();
-        if (activeAccountId === accountId) {
-          const remaining = accounts.filter((a) => a.id !== accountId);
-          if (remaining.length > 0) {
-            onSelectAccount(remaining[0].id);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Error deleting account:', err);
-    }
-  };
-
-  const handleSetDefault = async (accountId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await fetch(`/api/accounts/${accountId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isDefault: true }),
-      });
-      onRefreshAccounts();
-    } catch (err) {
-      console.error('Error setting default account:', err);
-    }
-  };
-
-  const startEditingName = (account: WhatsAppAccount, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingAccountId(account.id);
-    setEditingName(account.name);
-    setError(null);
-  };
-
-  const saveAccountName = async (accountId: string) => {
-    const name = editingName.trim();
-    if (!name) {
-      setError('O nome da linha não pode ficar vazio.');
-      return;
-    }
-    setSavingAccountName(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/accounts/${accountId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
+      const response = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, color }) });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível alterar o nome da linha.');
-      setEditingAccountId(null);
-      setEditingName('');
+      if (!response.ok) throw new Error(data.error || 'Não foi possível criar a instância.');
+      setCreating(false); setName(''); setColor('emerald');
+      setNotice(data.warning || 'Instância criada. Abra Configuração UazAPI para escanear o QR Code.');
       onRefreshAccounts();
-    } catch (err: any) {
-      setError(err.message || 'Erro ao alterar o nome da linha.');
-    } finally {
-      setSavingAccountName(false);
-    }
+      if (data.account?.id) onSelectAccount(data.account.id);
+    } catch (e: any) { setError(e.message); } finally { setSubmitting(false); }
   };
 
-  const handleRegisterApprovedName = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!registrationAccountId) return;
-    if (!/^\d{6}$/.test(registrationPin)) {
-      setError('Informe o PIN de 6 dígitos da verificação em duas etapas.');
-      return;
-    }
+  const update = async (id: string, body: any) => {
+    const response = await fetch(`/api/accounts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar a linha.');
+    onRefreshAccounts();
+  };
 
-    setIsRegisteringName(true);
-    setError(null);
-    setNotice(null);
+  const remove = async (account: WhatsAppAccount, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!confirm(`Remover “${account.name}” do FluxoZap? A instância remota da UazAPI não será apagada.`)) return;
+    const response = await fetch(`/api/accounts/${account.id}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) return setError(data.error || 'Não foi possível remover a linha.');
+    onRefreshAccounts();
+    if (activeAccountId === account.id) onSelectAccount(accounts.find((item) => item.id !== account.id)?.id || '');
+  };
+
+  const reconnect = async (account: WhatsAppAccount, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setConnectingId(account.id); setError(''); setNotice(''); setQrCode('');
     try {
-      const response = await fetch(`/api/accounts/${registrationAccountId}/register-approved-name`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ registrationPin }),
-      });
+      const response = await fetch(`/api/accounts/${account.id}/connect`, { method: 'POST' });
       const data = await response.json();
-      if (!response.ok) throw new Error([data.error, data.diagnosticTip].filter(Boolean).join(' ') || 'Não foi possível registrar o nome aprovado.');
-      setNotice(data.message || 'Nome aprovado registrado na Meta com sucesso.');
-      setRegistrationAccountId(null);
-      setRegistrationPin('');
+      if (!response.ok) throw new Error(data.error || 'Não foi possível gerar um novo QR Code.');
+      const nextQrCode = data.instance?.qrcode || data.qrcode || '';
+      if (!nextQrCode) throw new Error('A UazAPI iniciou a reconexão, mas ainda não retornou o QR Code. Tente novamente em alguns segundos.');
+      setQrCode(nextQrCode);
+      setQrAccountName(account.name);
+      setNotice(`Novo QR Code gerado para “${account.name}”.`);
+      onSelectAccount(account.id);
       onRefreshAccounts();
-    } catch (err: any) {
-      setError(err.message || 'Erro ao registrar o nome aprovado na Meta.');
+    } catch (e: any) {
+      setError(e.message);
     } finally {
-      setIsRegisteringName(false);
+      setConnectingId('');
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        {/* Header */}
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-              <Smartphone className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900">
-                Gerenciar Múltiplos Números do WhatsApp
-              </h2>
-              <p className="text-xs text-slate-500">
-                Cada número possui seu próprio Phone Number ID, funil exclusivo e clientes separados
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6 text-xs">
-          {error && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
-              {error}
-            </div>
-          )}
-          {notice && (
-            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs">
-              {notice}
-            </div>
-          )}
-
-          {/* List of existing numbers */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-slate-800 text-sm">
-                Números Conectados ({accounts.length})
-              </h3>
-              {!isCreating && (
-                <button
-                  type="button"
-                  onClick={() => setIsCreating(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs cursor-pointer shadow-xs transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Novo Número</span>
-                </button>
-              )}
-            </div>
-
-            <div className="space-y-2.5">
-              {accounts.map((acc) => {
-                const isSelected = acc.id === activeAccountId;
-                return (
-                  <div
-                    key={acc.id}
-                    onClick={() => onSelectAccount(acc.id)}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-4 ${
-                      isSelected
-                        ? 'border-emerald-500 bg-emerald-50/40 shadow-xs ring-1 ring-emerald-500/20'
-                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 border ${
-                          acc.color === 'blue'
-                            ? 'bg-blue-100 text-blue-700 border-blue-200'
-                            : acc.color === 'purple'
-                            ? 'bg-purple-100 text-purple-700 border-purple-200'
-                            : acc.color === 'amber'
-                            ? 'bg-amber-100 text-amber-700 border-amber-200'
-                            : acc.color === 'rose'
-                            ? 'bg-rose-100 text-rose-700 border-rose-200'
-                            : acc.color === 'indigo'
-                            ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
-                            : 'bg-emerald-100 text-emerald-700 border-emerald-200'
-                        }`}
-                      >
-                        <Smartphone className="w-4 h-4" />
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          {editingAccountId === acc.id ? (
-                            <input
-                              autoFocus
-                              value={editingName}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) => setEditingName(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  saveAccountName(acc.id);
-                                }
-                                if (event.key === 'Escape') {
-                                  setEditingAccountId(null);
-                                  setEditingName('');
-                                }
-                              }}
-                              className="min-w-0 max-w-56 rounded-md border border-emerald-300 bg-white px-2 py-1 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500/20"
-                              aria-label={`Novo nome para ${acc.name}`}
-                            />
-                          ) : (
-                            <span className="font-bold text-slate-900 text-sm truncate">
-                              {acc.name}
-                            </span>
-                          )}
-                          {acc.isDefault && (
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px] border border-slate-200">
-                              Padrão
-                            </span>
-                          )}
-                          {isSelected && (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold text-[10px] flex items-center gap-1 shadow-2xs">
-                              <Check className="w-2.5 h-2.5" /> Ativo
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-3 mt-1 text-slate-500 font-mono text-[11px]">
-                          <span>{acc.phoneNumber || 'Sem telefone exibido'}</span>
-                          <span>•</span>
-                          <span>ID: {acc.phoneNumberId}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {editingAccountId === acc.id ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              saveAccountName(acc.id);
-                            }}
-                            disabled={savingAccountName}
-                            title="Salvar novo nome"
-                            className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 cursor-pointer transition-colors"
-                          >
-                            {savingAccountName ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setEditingAccountId(null);
-                              setEditingName('');
-                            }}
-                            title="Cancelar edição"
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={(event) => startEditingName(acc, event)}
-                          title="Editar nome da linha"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 cursor-pointer transition-colors"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setRegistrationAccountId(acc.id);
-                          setRegistrationPin('');
-                          setError(null);
-                          setNotice(null);
-                        }}
-                        title="Registrar novamente na Meta depois que o novo nome de exibição for aprovado"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50 cursor-pointer transition-colors"
-                      >
-                        <ShieldCheck className="w-4 h-4" />
-                      </button>
-                      {!acc.isDefault && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleSetDefault(acc.id, e)}
-                          title="Definir como número padrão"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 cursor-pointer transition-colors"
-                        >
-                          <Star className="w-4 h-4" />
-                        </button>
-                      )}
-
-                      {accounts.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleDelete(acc.id, e)}
-                          title="Excluir este número"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {registrationAccountId && (() => {
-              const account = accounts.find((item) => item.id === registrationAccountId);
-              if (!account) return null;
-              return (
-                <form onSubmit={handleRegisterApprovedName} className="mt-3 rounded-xl border border-blue-200 bg-blue-50/60 p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-blue-950">Registrar nome aprovado na Meta</h4>
-                      <p className="mt-1 text-[11px] leading-relaxed text-blue-800">
-                        Use esta ação somente depois que o novo nome de exibição de <strong>{account.name}</strong> aparecer como aprovado no WhatsApp Manager.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRegistrationAccountId(null);
-                        setRegistrationPin('');
-                      }}
-                      className="rounded-lg p-1 text-blue-500 hover:bg-blue-100 hover:text-blue-800"
-                      title="Cancelar"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                    <label className="flex-1 font-semibold text-slate-700">
-                      PIN da verificação em duas etapas
-                      <input
-                        autoFocus
-                        type="password"
-                        inputMode="numeric"
-                        pattern="[0-9]{6}"
-                        maxLength={6}
-                        autoComplete="new-password"
-                        value={registrationPin}
-                        onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="6 dígitos"
-                        className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 font-mono text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </label>
-                    <button
-                      type="submit"
-                      disabled={isRegisteringName || registrationPin.length !== 6}
-                      className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isRegisteringName ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-                      Registrar nome aprovado
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-blue-700">O PIN é enviado somente nesta chamada e não é armazenado pelo FluxoZap.</p>
-                </form>
-              );
-            })()}
-          </div>
-
-          {/* Form to add a new WhatsApp number */}
-          {isCreating && (
-            <form
-              onSubmit={handleCreate}
-              className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/30 space-y-3.5 animate-in fade-in"
-            >
-              <div className="flex items-center justify-between pb-2 border-b border-emerald-100">
-                <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                  <Plus className="w-4 h-4 text-emerald-600" />
-                  Cadastrar Novo Número de WhatsApp
-                </h4>
-                <button
-                  type="button"
-                  onClick={() => setIsCreating(false)}
-                  className="text-slate-400 hover:text-slate-700 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Nome da Linha / Instância *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Ex: Comercial Vendas 2"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Número de Telefone Exibido
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.phoneNumber}
-                    onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                    placeholder="Ex: +55 11 99999-9999"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Meta Phone Number ID *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.phoneNumberId}
-                    onChange={(e) => setFormData({ ...formData, phoneNumberId: e.target.value })}
-                    placeholder="Ex: 1048591829104"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Localizado no painel Meta Developers &gt; WhatsApp &gt; Configuração da API.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    WABA ID (Opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.wabaId}
-                    onChange={(e) => setFormData({ ...formData, wabaId: e.target.value })}
-                    placeholder="Ex: 849201948102"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Access Token Específico (Opcional)
-                  </label>
-                  <input
-                    type="password"
-                    value={formData.accessToken}
-                    onChange={(e) => setFormData({ ...formData, accessToken: e.target.value })}
-                    placeholder="Em branco, usa o token global"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    PIN da verificação em duas etapas *
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    inputMode="numeric"
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    autoComplete="new-password"
-                    value={formData.registrationPin}
-                    onChange={(e) => setFormData({ ...formData, registrationPin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
-                    placeholder="6 dígitos"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">Usado apenas no registro e nunca armazenado.</p>
-                </div>
-              </div>
-
-              {/* Color picker */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1.5">
-                  Cor de Identificação
-                </label>
-                <div className="flex gap-2">
-                  {COLOR_OPTIONS.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setFormData({ ...formData, color: c.id })}
-                      className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-transform ${
-                        formData.color === c.id ? 'scale-125 ring-2 ring-slate-400' : ''
-                      } ${
-                        c.id === 'emerald'
-                          ? 'bg-emerald-500 border-emerald-600'
-                          : c.id === 'blue'
-                          ? 'bg-blue-500 border-blue-600'
-                          : c.id === 'purple'
-                          ? 'bg-purple-500 border-purple-600'
-                          : c.id === 'amber'
-                          ? 'bg-amber-500 border-amber-600'
-                          : c.id === 'rose'
-                          ? 'bg-rose-500 border-rose-600'
-                          : 'bg-indigo-500 border-indigo-600'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreating(false)}
-                  className="px-3 py-2 text-slate-600 hover:text-slate-900 font-medium cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg shadow-xs cursor-pointer disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" />
-                  )}
-                  <span>Registrar e salvar número</span>
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
-          <p>
-            💡 Ao receber mensagens pelo webhook da Meta, o FluxoZap reconhece automaticamente o número de destino e executa seu respectivo funil!
-          </p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg cursor-pointer transition-colors shrink-0"
-          >
-            Concluir
-          </button>
-        </div>
-      </div>
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs"><div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+    <div className="flex items-center justify-between border-b border-slate-100 p-5"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-600 text-white"><Smartphone className="h-5 w-5" /></div><div><h2 className="font-bold text-slate-900">Linhas do WhatsApp</h2><p className="text-xs text-slate-500">Cada linha é uma instância isolada na UazAPI.</p></div></div><button onClick={onClose}><X className="h-5 w-5 text-slate-400" /></button></div>
+    <div className="flex-1 space-y-5 overflow-y-auto p-6 text-xs">
+      {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-800">{error}</div>}
+      {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-800">{notice}</div>}
+      {qrCode && <div className="mx-auto max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center"><h3 className="mb-3 text-sm font-bold text-emerald-950">Conectar {qrAccountName}</h3><img src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`} alt={`QR Code de ${qrAccountName}`} className="mx-auto aspect-square w-full rounded-xl bg-white object-contain p-2" /><p className="mt-3 font-semibold text-emerald-900">WhatsApp → Aparelhos conectados → Conectar aparelho</p></div>}
+      <div className="flex items-center justify-between"><h3 className="text-sm font-bold text-slate-800">Instâncias ({accounts.length})</h3>{!creating && <button onClick={() => { setCreating(true); setError(''); }} className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white"><Plus className="h-3.5 w-3.5" /> Nova instância</button>}</div>
+      <div className="space-y-2.5">{accounts.map((account) => {
+        const selected = account.id === activeAccountId;
+        const status = account.connectionStatus || 'disconnected';
+        return <div key={account.id} onClick={() => onSelectAccount(account.id)} className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-3.5 ${selected ? 'border-emerald-500 bg-emerald-50/50' : 'border-slate-200'}`}>
+          <div className="min-w-0"><div className="flex items-center gap-2">{editingId === account.id ? <input autoFocus value={editingName} onClick={(e) => e.stopPropagation()} onChange={(e) => setEditingName(e.target.value)} className="rounded-md border px-2 py-1 text-sm font-bold" /> : <strong className="truncate text-sm text-slate-900">{account.name}</strong>}{account.isDefault && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px]">Padrão</span>}<span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${status === 'connected' ? 'bg-emerald-100 text-emerald-700' : status === 'connecting' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{status}</span></div><p className="mt-1 font-mono text-[11px] text-slate-500">{account.phoneNumber || 'Aguardando conexão'} · {account.uazapiInstanceId || account.phoneNumberId}</p></div>
+          <div className="flex shrink-0 gap-1">{status !== 'connected' && <button onClick={(e) => reconnect(account, e)} disabled={connectingId === account.id} title="Reconectar e gerar novo QR Code" className="rounded-lg bg-emerald-100 p-1.5 text-emerald-700 disabled:opacity-50">{connectingId === account.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}</button>}{editingId === account.id ? <button onClick={async (e) => { e.stopPropagation(); try { await update(account.id, { name: editingName }); setEditingId(''); } catch (x: any) { setError(x.message); } }} className="rounded-lg p-1.5 text-emerald-700"><Check className="h-4 w-4" /></button> : <button onClick={(e) => { e.stopPropagation(); setEditingId(account.id); setEditingName(account.name); }} className="rounded-lg p-1.5 text-slate-400"><Pencil className="h-4 w-4" /></button>}{!account.isDefault && <button onClick={async (e) => { e.stopPropagation(); await update(account.id, { isDefault: true }); }} className="rounded-lg p-1.5 text-amber-600"><Star className="h-4 w-4" /></button>}<button onClick={(e) => remove(account, e)} className="rounded-lg p-1.5 text-rose-500"><Trash2 className="h-4 w-4" /></button></div>
+        </div>;
+      })}</div>
+      {creating && <form onSubmit={create} className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4"><div className="flex items-center justify-between"><h4 className="flex items-center gap-2 font-bold"><QrCode className="h-4 w-4 text-emerald-600" /> Criar instância UazAPI</h4><button type="button" onClick={() => setCreating(false)}>Cancelar</button></div><label className="block font-semibold text-slate-700">Nome da linha<input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Comercial 01" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2" /></label><div><p className="mb-2 font-semibold text-slate-700">Cor</p><div className="flex gap-2">{colors.map((item) => <button key={item} type="button" onClick={() => setColor(item)} style={{ backgroundColor: ({ emerald: '#10b981', blue: '#3b82f6', purple: '#a855f7', amber: '#f59e0b', rose: '#f43f5e', indigo: '#6366f1' } as Record<string, string>)[item] }} className={`h-6 w-6 rounded-full border-2 border-white ${color === item ? 'ring-2 ring-slate-400' : ''}`} aria-label={item} />)}</div></div><button disabled={submitting} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white disabled:opacity-50">{submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Criar e gerar QR Code</button></form>}
     </div>
-  );
+    <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 p-4"><p className="text-xs text-slate-500">Use Configuração UazAPI para ler o QR Code da linha selecionada.</p><button onClick={onClose} className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white">Concluir</button></div>
+  </div></div>;
 };

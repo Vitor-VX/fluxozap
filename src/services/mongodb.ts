@@ -26,6 +26,7 @@ export const FLUXOZAP_DATABASE_NAME = 'FluxoZap';
 
 export interface ProjectSnapshot {
   config?: any;
+  uazapiConfig?: any;
   r2Config?: any;
   xpagConfig?: any;
   metaCapiConfig?: any;
@@ -205,6 +206,7 @@ class MongoService {
       await ProjectConfig.create({
         identifier: 'default',
         meta: initialData.config || {},
+        uazapi: initialData.uazapiConfig || {},
         r2: initialData.r2Config || {},
         xpag: initialData.xpagConfig || {},
         metaCapi: initialData.metaCapiConfig || {},
@@ -238,6 +240,7 @@ class MongoService {
     ]);
     return {
       config: (project as any)?.meta || {},
+      uazapiConfig: (project as any)?.uazapi || {},
       r2Config: (project as any)?.r2 || {},
       xpagConfig: (project as any)?.xpag || {},
       metaCapiConfig: (project as any)?.metaCapi || {},
@@ -289,6 +292,12 @@ class MongoService {
   public async saveMetaConfig(data: any): Promise<boolean> {
     if (!this.isConnected()) return false;
     await ProjectConfig.updateOne({ identifier: 'default' }, { $set: { meta: data } }, { upsert: true });
+    return true;
+  }
+
+  public async saveUazapiConfig(data: any): Promise<boolean> {
+    if (!this.isConnected()) return false;
+    await ProjectConfig.updateOne({ identifier: 'default' }, { $set: { uazapi: data } }, { upsert: true });
     return true;
   }
 

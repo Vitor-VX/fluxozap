@@ -1,6 +1,6 @@
-# FluxoZap - WhatsApp Flow Builder & Meta Cloud API
+# FluxoZap - WhatsApp Flow Builder & UazAPI
 
-Plataforma visual estilo **Typebot / 2chat** para WhatsApp Oficial usando **React Flow**, **Express** e **MongoDB Atlas** (banco dedicado: `FluxoZap`).
+Plataforma visual estilo **Typebot / 2chat** integrada à **UazAPI GO**, usando **React Flow**, **Express** e **MongoDB Atlas** (banco dedicado: `FluxoZap`). Cada linha do WhatsApp usa uma instância isolada e conecta por QR Code.
 
 ---
 
@@ -38,11 +38,9 @@ cp .env.example .env
 Abra o arquivo `.env` e preencha suas variáveis (ou configure depois diretamente pela interface web nas abas de Configurações):
 
 ```env
-# Meta WhatsApp Cloud API (opcional via .env ou direto na interface)
-WHATSAPP_PHONE_NUMBER_ID=""
-WHATSAPP_ACCESS_TOKEN=""
-WHATSAPP_WABA_ID=""
-WHATSAPP_VERIFY_TOKEN="fluxozap_webhook_secret_2026"
+# UazAPI GO (também configurável pela interface)
+UAZAPI_SERVER_URL="https://seu-subdominio.uazapi.com"
+UAZAPI_ADMIN_TOKEN=""
 
 # MongoDB Atlas URI (opcional via .env ou direto na aba MongoDB Atlas)
 MONGODB_URI="mongodb+srv://<usuario>:<senha>@cluster0.abcde.mongodb.net/?retryWrites=true&w=majority"
@@ -72,9 +70,16 @@ Pronto! Acesse no navegador:
 
 ---
 
+## Conectar números pela UazAPI
+
+1. Abra **Configuração UazAPI** e salve a Server URL e o Admin Token.
+2. Em **Gerenciar números**, crie uma instância.
+3. Selecione a linha criada e leia o QR Code em **WhatsApp → Aparelhos conectados**.
+4. Publique o FluxoZap em uma URL HTTPS e use **Configurar automaticamente** para registrar `/api/webhooks/uazapi` na instância.
+
 ## 🌐 Como Receber Webhooks do WhatsApp Localmente
 
-Como a API da Meta precisa enviar mensagens para uma URL HTTPS pública, use o **ngrok** ou **cloudflared** no seu PC:
+Como a UazAPI precisa entregar eventos em uma URL HTTPS pública, use o **ngrok** ou **cloudflared** no seu PC:
 
 ```bash
 # Opção 1: Usando Ngrok
@@ -84,7 +89,7 @@ npx ngrok http 3000
 npx cloudflared tunnel --url http://localhost:3000
 ```
 
-Copie a URL HTTPS gerada (ex: `https://xyz.ngrok-free.app/api/webhook`) e cole no portal da Meta Developers!
+Copie a origem HTTPS gerada e configure o webhook pela tela **Configuração UazAPI**.
 
 ## Pagamentos no Brasil e México com XPag Global
 
@@ -114,17 +119,17 @@ As sessões são salvas em JSON e no MongoDB depois de cada mudança de nó. Na 
 
 ## Isolamento por número do WhatsApp
 
-Cada linha cadastrada possui seu próprio **Fluxo 1**, credenciais da Meta, clientes, sessões, histórico, pagamentos e logs. A identidade de uma conversa é composta por `accountId + telefone do cliente`; portanto, o mesmo cliente falando com duas linhas inicia dois atendimentos totalmente independentes.
+Cada linha cadastrada possui seu próprio **Fluxo 1**, instância e token UazAPI, clientes, sessões, histórico, pagamentos e logs. A identidade de uma conversa é composta por `accountId + telefone do cliente`; portanto, o mesmo cliente falando com duas linhas inicia dois atendimentos totalmente independentes.
 
-O seletor no topo define o contexto de todas as telas. Ao trocar de linha, a conversa aberta é fechada, a lista exibe somente os clientes daquela linha e os envios usam obrigatoriamente o Phone Number ID e o token da linha selecionada. Não existe fallback para as credenciais da linha principal.
+O seletor no topo define o contexto de todas as telas. Ao trocar de linha, a conversa aberta é fechada, a lista exibe somente os clientes daquela linha e os envios usam obrigatoriamente o token da instância selecionada. Não existe fallback entre linhas.
 
 ## Mídias de entrada e saída
 
-Nos blocos de imagem, áudio, vídeo e documento, o arquivo local pode ser enviado diretamente para a biblioteca de mídia da Meta ou armazenado no Cloudflare R2. No modo R2, o fluxo guarda a URL persistente e, durante a execução, converte o arquivo em `media_id` usando as credenciais Meta da linha responsável pelo contato. Isso evita falhas `131053` causadas por links privados ou inacessíveis e mantém cada envio associado ao número correto.
+Nos blocos de imagem, áudio, vídeo e documento, o arquivo local é armazenado no Cloudflare R2. O fluxo guarda a URL persistente e a entrega à UazAPI durante a execução, sempre usando o token da linha responsável pelo contato.
 
 Fotos, áudios, vídeos e documentos recebidos ou enviados pelos blocos têm limite máximo de **100 MB por arquivo**. Downloads e uploads acima desse tamanho são rejeitados sem persistir o conteúdo.
 
-O bloco **Enviar Áudio / Voz** envia como mensagem de voz por padrão. O servidor converte automaticamente MP3, M4A, WAV e outros formatos de áudio para OGG/Opus mono e inclui `voice: true` no payload da Meta. A opção pode ser desmarcada no bloco quando o objetivo for enviar um anexo de áudio comum.
+O bloco **Enviar Áudio / Voz** envia como mensagem de voz por padrão usando o tipo `ptt` da UazAPI. A opção pode ser desmarcada quando o objetivo for enviar um anexo de áudio comum.
 
 ## Alerta musical de vendas
 

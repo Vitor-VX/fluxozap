@@ -9,28 +9,22 @@ import {
   Cloud,
   Unplug,
   BadgeDollarSign,
-  Activity,
-  BarChart3,
   Moon,
   Sun,
 } from 'lucide-react';
 import { FlowEditor } from './components/flow/FlowEditor';
 import { MetaApiSettings } from './components/settings/MetaApiSettings';
 import { XPagSettings } from './components/settings/XPagSettings';
-import { MetaConversionsSettings } from './components/settings/MetaConversionsSettings';
-import { FacebookAdsDashboard } from './components/ads/FacebookAdsDashboard';
 import { ConversationsList } from './components/conversations/ConversationsList';
 import { LogsViewer } from './components/logs/LogsViewer';
 import { MongoDbSettings } from './components/database/MongoDbSettings';
 import { R2StorageSettings } from './components/storage/R2StorageSettings';
-import { ApiSpendTracker } from './components/analytics/ApiSpendTracker';
 import { AccountHeaderSelector } from './components/accounts/AccountHeaderSelector';
 import { AccountManagerModal } from './components/accounts/AccountManagerModal';
 import { GlobalSaleMusicMonitor } from './components/music/GlobalSaleMusicMonitor';
 import { WhatsAppAccount } from './types/flow';
-import { DollarSign } from 'lucide-react';
 
-type ActiveTab = 'editor' | 'conversations' | 'costs' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag' | 'capi' | 'ads';
+type ActiveTab = 'editor' | 'conversations' | 'logs' | 'mongodb' | 'r2' | 'settings' | 'xpag';
 const ACTIVE_ACCOUNT_STORAGE_KEY = 'fluxozap:active-whatsapp-account';
 
 export interface ConversationTarget {
@@ -80,15 +74,10 @@ export default function App() {
           setActiveAccountId('');
           return;
         }
-        if (activeAccountId && !data.some((account) => account.id === activeAccountId)) {
-          const def = data.find((account) => account.isDefault) || data[0];
-          setActiveAccountId(def.id);
-          return;
-        }
-        if (data.length > 0 && !activeAccountId) {
-          const def = data.find((a) => a.isDefault) || data[0];
-          setActiveAccountId(def.id);
-        }
+        setActiveAccountId((currentId) => {
+          if (currentId && data.some((account) => account.id === currentId)) return currentId;
+          return (data.find((account) => account.isDefault) || data[0]).id;
+        });
       }
     } catch (err) {
       console.error('Error fetching accounts:', err);
@@ -97,6 +86,8 @@ export default function App() {
 
   useEffect(() => {
     fetchAccounts();
+    const interval = window.setInterval(fetchAccounts, 4000);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -148,7 +139,7 @@ export default function App() {
             <div className="flex items-baseline gap-1.5">
               <span className="text-base font-bold tracking-tight text-slate-900">FluxoZap</span>
               <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 hidden sm:inline">
-                WhatsApp &amp; Ads
+                UazAPI
               </span>
             </div>
           </div>
@@ -165,9 +156,9 @@ export default function App() {
           {accounts.length === 0 && (
             <button
               type="button"
-              onClick={() => setActiveTab('settings')}
+              onClick={() => setIsAccountModalOpen(true)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer text-xs font-semibold"
-              title="Validar o Phone Number ID na Meta"
+              title="Criar a primeira instância UazAPI"
             >
               <Unplug className="w-3.5 h-3.5" />
               <span>Nenhum número conectado</span>
@@ -201,19 +192,6 @@ export default function App() {
           >
             <Users className="w-3.5 h-3.5 text-teal-600" />
             <span>Conversas &amp; Leads</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('costs')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-              activeTab === 'costs'
-                ? 'bg-white text-slate-900 shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Custos da API</span>
           </button>
 
           <button
@@ -278,28 +256,6 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('capi')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-              activeTab === 'capi' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5 text-blue-600" />
-            <span>Meta Conversões</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('ads')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-              activeTab === 'ads' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Facebook Ads</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'settings'
@@ -308,7 +264,7 @@ export default function App() {
             }`}
           >
             <Settings className="w-3.5 h-3.5 text-slate-600" />
-            <span>Configuração Meta API</span>
+            <span>Configuração UazAPI</span>
           </button>
         </nav>
 
@@ -362,17 +318,12 @@ export default function App() {
             onConversationTargetHandled={() => setConversationTarget(null)}
           />
         )}
-        {activeTab === 'costs' && (
-          <ApiSpendTracker accounts={accounts} activeAccountId={activeAccountId} />
-        )}
         {activeTab === 'logs' && (
           <LogsViewer activeAccountId={activeAccountId} activeAccountName={activeAccount?.name} />
         )}
         {activeTab === 'mongodb' && <MongoDbSettings />}
         {activeTab === 'r2' && <R2StorageSettings />}
         {activeTab === 'xpag' && <XPagSettings />}
-        {activeTab === 'capi' && <MetaConversionsSettings accountId={activeAccountId} accountName={activeAccount?.name} />}
-        {activeTab === 'ads' && <FacebookAdsDashboard accountId={activeAccountId} accountName={activeAccount?.name} onOpenSettings={() => setActiveTab('capi')} onOpenConversation={openConversation} />}
         {activeTab === 'settings' && (
           <MetaApiSettings
             onOpenLogs={() => setActiveTab('logs')}

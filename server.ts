@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { mongoService } from './src/services/mongodb';
 import { r2StorageService } from './src/services/r2Storage';
+import { uazapiService, UazapiHttpError } from './src/services/uazapi';
 import { normalizeAccountName } from './src/services/accountValidation';
 import { mergeLegacyAndMongoSessions } from './src/services/legacySessionMigration';
 import {
@@ -396,6 +397,13 @@ interface WhatsAppAccount {
   verifyToken?: string;
   ctwaDatasetId?: string;
   registrationStatus?: 'registered' | 'unknown';
+  provider?: 'uazapi';
+  uazapiInstanceId?: string;
+  uazapiToken?: string;
+  connectionStatus?: 'disconnected' | 'connecting' | 'connected' | 'hibernated' | string;
+  profileName?: string;
+  profilePicUrl?: string;
+  isBusiness?: boolean;
   isDefault?: boolean;
   color?: string;
   flow?: any;
@@ -480,9 +488,8 @@ function syncPrimaryAccountFromMeta(displayPhoneNumber?: string): WhatsAppAccoun
   return account;
 }
 
-if (metaConfig.displayPhoneNumber && metaConfig.phoneNumberId) {
-  syncPrimaryAccountFromMeta();
-}
+// Official Meta lines are no longer auto-created. New lines are provisioned as
+// isolated UazAPI instances through /api/accounts.
 
 function saveAccountsToFile() {
   try {
@@ -1444,6 +1451,7 @@ interface MetaAccountCredentials {
   name?: string;
   phoneNumberId?: string;
   accessToken?: string;
+  uazapiToken?: string;
 }
 
 interface OutgoingMediaPayload {
@@ -1911,6 +1919,100 @@ async function sendMetaWhatsAppMessage(
   }
 }
 
+function uazapiMessageId(data: any): string | undefined {
+  const value = data?.messageid || data?.messageId || data?.id || data?.message?.messageid || data?.message?.id;
+  return value ? String(value) : undefined;
+}
+
+async function resolveUazapiMediaFile(payload: OutgoingMediaPayload): Promise<string> {
+  if (payload.mediaUrl && /^https:\/\//i.test(payload.mediaUrl)) return payload.mediaUrl;
+  if (payload.mediaUrl?.startsWith('/uploads/')) {
+    const safeFilename = path.basename(payload.mediaUrl);
+    const localPath = path.resolve(UPLOADS_DIR, safeFilename);
+    if (!localPath.startsWith(`${UPLOADS_DIR}${path.sep}`) || !fs.existsSync(localPath)) {
+      throw new Error('O arquivo local informado não foi encontrado.');
+    }
+    const stat = fs.statSync(localPath);
+    if (stat.size > MAX_MEDIA_BYTES) throw new Error('O arquivo excede o limite máximo de 100 MB.');
+    const mimeType = payload.mimeType || inferMimeType(payload.filename || safeFilename);
+    return `data:${mimeType};base64,${fs.readFileSync(localPath).toString('base64')}`;
+  }
+  if (payload.mediaId) {
+    throw new Error('Esta mídia ainda usa um ID antigo da Meta. Reenvie o arquivo no bloco para armazená-lo no R2 e enviá-lo pela UazAPI.');
+  }
+  throw new Error('Nenhum arquivo ou URL HTTPS de mídia foi informado.');
+}
+
+async function sendUazapiWhatsAppMessage(
+  recipientPhone: string,
+  messageType: 'text' | 'image' | 'document' | 'audio' | 'video',
+  payload: OutgoingMediaPayload,
+  accountOverride?: MetaAccountCredentials
+): Promise<{ success: boolean; data?: any; error?: string; logEntry?: ApiLogEntry }> {
+  const cleanPhone = recipientPhone.replace(/\D/g, '');
+  const instanceToken = String(accountOverride?.uazapiToken || '').trim();
+  const endpoint = messageType === 'text' ? 'POST /send/text' : 'POST /send/media';
+  if (!instanceToken) {
+    const log = addApiLog({
+      type: 'error', direction: 'outbound', endpoint,
+      accountId: accountOverride?.id, accountName: accountOverride?.name,
+      recipient: cleanPhone, messageType, success: false,
+      metaErrorMessage: 'Token da instância UazAPI ausente.',
+      diagnosticTip: 'Conecte novamente esta linha pelo QR Code para obter uma instância UazAPI válida.',
+    });
+    return { success: false, error: 'A linha selecionada não possui token de instância UazAPI.', logEntry: log };
+  }
+
+  let requestPayload: any;
+  try {
+    let rawData: any;
+    if (messageType === 'text') {
+      requestPayload = { number: cleanPhone, text: payload.text || '', replyid: payload.replyToMessageId };
+      rawData = await uazapiService.sendText(instanceToken, cleanPhone, payload.text || '', payload.replyToMessageId);
+    } else {
+      const file = await resolveUazapiMediaFile(payload);
+      const uazapiType = messageType === 'audio' && payload.voice ? 'ptt' : messageType;
+      requestPayload = {
+        number: cleanPhone,
+        type: uazapiType,
+        file: /^data:/i.test(file) ? `[base64 ${Math.round(file.length / 1024)} KB]` : file,
+        text: messageType === 'audio' ? undefined : payload.caption,
+        docName: messageType === 'document' ? payload.filename || 'documento.pdf' : undefined,
+        replyid: payload.replyToMessageId,
+      };
+      rawData = await uazapiService.sendMedia(instanceToken, {
+        number: cleanPhone,
+        type: uazapiType,
+        file,
+        text: messageType === 'audio' ? undefined : payload.caption,
+        docName: messageType === 'document' ? payload.filename || 'documento.pdf' : undefined,
+        replyid: payload.replyToMessageId,
+      });
+    }
+    const messageId = uazapiMessageId(rawData);
+    const data = messageId ? { ...rawData, messages: [{ id: messageId }] } : rawData;
+    const log = addApiLog({
+      type: 'outgoing_message', direction: 'outbound', endpoint,
+      accountId: accountOverride?.id, accountName: accountOverride?.name,
+      recipient: cleanPhone, messageType, httpStatus: 200, success: true,
+      requestPayload, responseBody: rawData,
+    });
+    return { success: true, data, logEntry: log };
+  } catch (error: any) {
+    const status = error instanceof UazapiHttpError ? error.status : 500;
+    const responseBody = error instanceof UazapiHttpError ? error.responseBody : undefined;
+    const message = error?.message || 'Falha ao enviar mensagem pela UazAPI.';
+    const log = addApiLog({
+      type: 'error', direction: 'outbound', endpoint,
+      accountId: accountOverride?.id, accountName: accountOverride?.name,
+      recipient: cleanPhone, messageType, httpStatus: status, success: false,
+      requestPayload, responseBody, metaErrorMessage: message,
+      diagnosticTip: responseBody?.provider_message_ptbr || responseBody?.message_ptbr || message,
+    });
+    return { success: false, error: `UazAPI (${status}): ${message}`, data: responseBody, logEntry: log };
+  }
+}
+
 // Only one flow runner may mutate a line/contact session at a time. Meta can
 // deliver a second inbound webhook while the first runner is awaiting an API
 // request; without this guard, that message can start the same funnel again.
@@ -1983,7 +2085,13 @@ async function executeFlowSteps(
   const nodes = activeFlow.nodes || [];
   const edges = activeFlow.edges || [];
   const accountCreds = sessionAccount
-    ? { id: sessionAccount.id, name: sessionAccount.name, phoneNumberId: sessionAccount.phoneNumberId, accessToken: sessionAccount.accessToken }
+    ? {
+        id: sessionAccount.id,
+        name: sessionAccount.name,
+        phoneNumberId: sessionAccount.phoneNumberId,
+        accessToken: sessionAccount.accessToken,
+        uazapiToken: sessionAccount.uazapiToken,
+      }
     : undefined;
 
   const executionErrors: string[] = [];
@@ -2025,7 +2133,7 @@ async function executeFlowSteps(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp) {
-        const sendResult = await sendMetaWhatsAppMessage(
+        const sendResult = await sendUazapiWhatsAppMessage(
           session.phoneNumber,
           'text',
           { text: parsedText },
@@ -2053,7 +2161,7 @@ async function executeFlowSteps(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp && (currentNode.data.mediaId || parsedMediaUrl)) {
-        const sendResult = await sendMetaWhatsAppMessage(
+        const sendResult = await sendUazapiWhatsAppMessage(
           session.phoneNumber,
           'image',
           {
@@ -2087,7 +2195,7 @@ async function executeFlowSteps(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp && (currentNode.data.mediaId || parsedMediaUrl)) {
-        const sendResult = await sendMetaWhatsAppMessage(
+        const sendResult = await sendUazapiWhatsAppMessage(
           session.phoneNumber,
           'audio',
           {
@@ -2122,7 +2230,7 @@ async function executeFlowSteps(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp && (currentNode.data.mediaId || parsedMediaUrl)) {
-        const sendResult = await sendMetaWhatsAppMessage(
+        const sendResult = await sendUazapiWhatsAppMessage(
           session.phoneNumber,
           'video',
           {
@@ -2157,7 +2265,7 @@ async function executeFlowSteps(
       session.history.push(msgItem);
 
       if (isLiveWhatsApp && (currentNode.data.mediaId || parsedMediaUrl)) {
-        const sendResult = await sendMetaWhatsAppMessage(
+        const sendResult = await sendUazapiWhatsAppMessage(
           session.phoneNumber,
           'document',
           {
@@ -2855,6 +2963,7 @@ async function startServer() {
   // Auto-connect to MongoDB Atlas if URI is present
   await mongoService.autoConnect({
     config: metaConfig,
+    uazapiConfig: uazapiService.getPersistableConfig(),
     r2Config: r2StorageService.getConfig(),
     xpagConfig,
     metaCapiConfig: metaCapiConfigs,
@@ -2874,6 +2983,9 @@ async function startServer() {
       await cleanupExpiredApiLogs();
       const doc = await mongoService.getProjectSnapshot();
       if (doc) {
+        if (doc.uazapiConfig?.serverUrl) {
+          uazapiService.updateConfig(doc.uazapiConfig);
+        }
         const databaseFlows = doc.flows || [];
         currentFlow = databaseFlows.find((flow: any) => flow?.id === 'flow_main') ||
           createEmptyAccountFlow('main', 'Principal');
@@ -3671,6 +3783,7 @@ async function startServer() {
     if (result.success) {
       await mongoService.ensureProjectData({
         config: metaConfig,
+        uazapiConfig: uazapiService.getPersistableConfig(),
         r2Config: r2StorageService.getConfig(),
         xpagConfig,
         flow: currentFlow,
@@ -3699,6 +3812,7 @@ async function startServer() {
     try {
       await mongoService.saveFlow(currentFlow);
       await mongoService.saveMetaConfig(metaConfig);
+      await mongoService.saveUazapiConfig(uazapiService.getPersistableConfig());
       await mongoService.saveR2Config(r2StorageService.getConfig());
       await mongoService.saveXPagConfig(xpagConfig);
       await mongoService.saveAccounts(whatsappAccounts);
@@ -4309,63 +4423,168 @@ async function startServer() {
     phoneNumber: string;
     blocked: boolean;
   }): Promise<any> {
-    const accessToken = String(input.account.accessToken || metaConfig.accessToken || '').trim();
-    if (!input.account.phoneNumberId) {
-      const error: any = new Error('A linha selecionada não possui um Meta Phone Number ID configurado.');
+    if (!input.account.uazapiToken) {
+      const error: any = new Error('A linha selecionada não possui um token de instância UazAPI.');
       error.status = 400;
       throw error;
     }
-    if (!accessToken) {
-      const error: any = new Error('A linha selecionada não possui um Access Token válido da Meta.');
-      error.status = 400;
-      throw error;
-    }
-
-    const requestPayload = buildWhatsAppBlockUsersPayload(input.phoneNumber);
-    const endpoint = `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${encodeURIComponent(input.account.phoneNumberId)}/block_users`;
-    const response = await fetch(endpoint, {
-      method: input.blocked ? 'POST' : 'DELETE',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestPayload),
-    });
-    const responseBody: any = await response.json().catch(() => ({}));
-    const diagnostic = analyzeMetaError(response.status, responseBody);
+    const requestPayload = { number: input.phoneNumber.replace(/\D/g, ''), block: input.blocked };
+    const responseBody = await uazapiService.setChatBlocked(
+      input.account.uazapiToken,
+      requestPayload.number,
+      input.blocked
+    );
     addApiLog({
       type: 'integration',
       direction: 'outbound',
-      endpoint: `${input.blocked ? 'POST' : 'DELETE'} /${META_GRAPH_API_VERSION}/${input.account.phoneNumberId}/block_users`,
+      endpoint: 'POST /chat/block',
       accountId: input.account.id,
       accountName: input.account.name,
-      phoneNumberId: input.account.phoneNumberId,
       recipient: input.phoneNumber.replace(/\D/g, ''),
       messageType: input.blocked ? 'block_whatsapp_user' : 'unblock_whatsapp_user',
-      httpStatus: response.status,
-      success: response.ok,
+      httpStatus: 200,
+      success: true,
       requestPayload,
       responseBody,
-      metaErrorCode: diagnostic.code,
-      metaErrorSubcode: diagnostic.subcode,
-      metaErrorMessage: response.ok ? undefined : diagnostic.message,
-      metaErrorType: diagnostic.type,
-      metaFbTraceId: diagnostic.fbtrace_id,
-      diagnosticTip: response.ok ? undefined : diagnostic.tip,
     });
-    if (!response.ok) {
-      const error: any = new Error(`A Meta não conseguiu ${input.blocked ? 'bloquear' : 'desbloquear'} o contato: ${diagnostic.message}`);
-      error.status = response.status >= 400 && response.status < 500 ? response.status : 502;
-      error.meta = responseBody?.error;
-      error.diagnosticTip = diagnostic.tip;
-      throw error;
-    }
     return responseBody;
   }
 
   // API: Multiple WhatsApp Accounts / Phone Numbers Management
   app.get('/api/accounts', (_req: Request, res: Response) => {
-    res.json(whatsappAccounts.map(({ flow: _flow, ...account }) => account));
+    res.json(whatsappAccounts.map(({ flow: _flow, uazapiToken: _token, accessToken: _legacyToken, ...account }) => ({
+      ...account,
+      hasInstanceToken: Boolean(_token),
+    })));
+  });
+
+  app.get('/api/uazapi/config', (_req: Request, res: Response) => {
+    res.json(uazapiService.getConfig());
+  });
+
+  app.post('/api/uazapi/config', async (req: Request, res: Response) => {
+    try {
+      uazapiService.updateConfig({
+        serverUrl: req.body?.serverUrl,
+        adminToken: req.body?.adminToken,
+      });
+      await mongoService.saveUazapiConfig(uazapiService.getPersistableConfig());
+      res.json({ success: true, message: 'Configuração da UazAPI salva.', config: uazapiService.getConfig() });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/uazapi/test', async (_req: Request, res: Response) => {
+    try {
+      const result = await uazapiService.testAdminConnection();
+      const instances = Array.isArray(result) ? result.length : Array.isArray(result?.instances) ? result.instances.length : undefined;
+      res.json({ success: true, message: 'Conexão administrativa com a UazAPI validada.', instances });
+    } catch (error: any) {
+      const isFreeDemoRestriction = /public demo server.*endpoint has been disabled/i.test(
+        String(error?.message || error?.responseBody?.error || '')
+      );
+      const testAccount = whatsappAccounts.find((account) => Boolean(account.uazapiToken));
+
+      if (isFreeDemoRestriction && testAccount?.uazapiToken) {
+        try {
+          await uazapiService.getInstanceStatus(testAccount.uazapiToken);
+          return res.json({
+            success: true,
+            message: 'Servidor free da UazAPI validado pela instância. A listagem administrativa é desabilitada no ambiente demo.',
+            instances: whatsappAccounts.filter((account) => Boolean(account.uazapiToken)).length,
+            validationMode: 'instance',
+          });
+        } catch (instanceError: any) {
+          return res.status(instanceError.status || 500).json({
+            success: false,
+            error: instanceError.message,
+            details: instanceError.responseBody,
+          });
+        }
+      }
+
+      res.status(error.status || 500).json({ success: false, error: error.message, details: error.responseBody });
+    }
+  });
+
+  app.get('/api/accounts/:id/status', async (req: Request, res: Response) => {
+    const account = whatsappAccounts.find((item) => item.id === req.params.id);
+    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
+    if (!account.uazapiToken) return res.status(409).json({ success: false, error: 'Esta linha não possui uma instância UazAPI.' });
+    try {
+      const data = await uazapiService.getInstanceStatus(account.uazapiToken);
+      const instance = data.instance || {};
+      const providerConnected = data.status?.connected === true || data.status?.loggedIn === true;
+      account.connectionStatus = providerConnected
+        ? 'connected'
+        : instance.status || account.connectionStatus || 'disconnected';
+      account.profileName = instance.profileName || account.profileName;
+      account.profilePicUrl = instance.profilePicUrl || account.profilePicUrl;
+      account.isBusiness = instance.isBusiness ?? account.isBusiness;
+      const connectedPhone = String(instance.owner || data.status?.jid?.user || '').replace(/\D/g, '');
+      if (connectedPhone) account.phoneNumber = connectedPhone;
+      account.updatedAt = new Date().toISOString();
+      saveAccountsToFile();
+      res.json({
+        success: true,
+        instance: { ...instance, token: undefined },
+        status: data.status,
+        account: { ...account, uazapiToken: undefined },
+      });
+    } catch (error: any) {
+      res.status(error.status || 500).json({ success: false, error: error.message, details: error.responseBody });
+    }
+  });
+
+  app.post('/api/accounts/:id/connect', async (req: Request, res: Response) => {
+    const account = whatsappAccounts.find((item) => item.id === req.params.id);
+    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
+    if (!account.uazapiToken) return res.status(409).json({ success: false, error: 'Esta linha não possui uma instância UazAPI.' });
+    try {
+      const data = await uazapiService.connectInstance(account.uazapiToken);
+      account.connectionStatus = data?.instance?.status || 'connecting';
+      account.updatedAt = new Date().toISOString();
+      saveAccountsToFile();
+      res.json({
+        success: true,
+        ...data,
+        instance: data?.instance ? { ...data.instance, token: undefined } : data?.instance,
+      });
+    } catch (error: any) {
+      res.status(error.status || 500).json({ success: false, error: error.message, details: error.responseBody });
+    }
+  });
+
+  app.post('/api/accounts/:id/disconnect', async (req: Request, res: Response) => {
+    const account = whatsappAccounts.find((item) => item.id === req.params.id);
+    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
+    if (!account.uazapiToken) return res.status(409).json({ success: false, error: 'Esta linha não possui uma instância UazAPI.' });
+    try {
+      const data = await uazapiService.disconnectInstance(account.uazapiToken);
+      account.connectionStatus = 'disconnected';
+      account.updatedAt = new Date().toISOString();
+      saveAccountsToFile();
+      res.json({ success: true, ...data });
+    } catch (error: any) {
+      res.status(error.status || 500).json({ success: false, error: error.message, details: error.responseBody });
+    }
+  });
+
+  app.post('/api/accounts/:id/configure-webhook', async (req: Request, res: Response) => {
+    const account = whatsappAccounts.find((item) => item.id === req.params.id);
+    if (!account) return res.status(404).json({ success: false, error: 'Linha do WhatsApp não encontrada.' });
+    if (!account.uazapiToken) return res.status(409).json({ success: false, error: 'Esta linha não possui uma instância UazAPI.' });
+    const publicOrigin = String(req.body?.publicOrigin || lastKnownPublicOrigin || '').replace(/\/$/, '');
+    if (!publicOrigin || /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(publicOrigin)) {
+      return res.status(400).json({ success: false, error: 'A UazAPI precisa de uma URL HTTPS pública do FluxoZap para entregar webhooks.' });
+    }
+    try {
+      const data = await uazapiService.configureWebhook(account.uazapiToken, `${publicOrigin}/api/webhooks/uazapi`);
+      res.json({ success: true, message: 'Webhook da UazAPI configurado.', webhookUrl: `${publicOrigin}/api/webhooks/uazapi`, data });
+    } catch (error: any) {
+      res.status(error.status || 500).json({ success: false, error: error.message, details: error.responseBody });
+    }
   });
 
   app.post('/api/accounts', async (req: Request, res: Response) => {
@@ -4376,30 +4595,17 @@ async function startServer() {
           error: 'MongoDB indisponível. Não é possível criar uma linha sem persistir seu Fluxo 1 no banco.',
         });
       }
-      const { name, phoneNumber, phoneNumberId, wabaId, accessToken, registrationPin, color, isDefault } = req.body;
-      if (!name || !phoneNumberId) {
-        return res.status(400).json({ success: false, error: 'Nome e Phone Number ID são obrigatórios.' });
-      }
-      const normalizedPhoneNumberId = String(phoneNumberId).trim();
-      const normalizedAccessToken = String(accessToken || '').trim();
-      const effectiveAccessToken = normalizedAccessToken || metaConfig.accessToken.trim();
-      const normalizedRegistrationPin = String(registrationPin || '').trim();
-      if (!effectiveAccessToken) {
-        return res.status(400).json({ success: false, error: 'Informe o Access Token específico ou configure um token global antes de registrar o número.' });
-      }
-      if (!/^\d{6}$/.test(normalizedRegistrationPin)) {
-        return res.status(400).json({ success: false, error: 'Informe o PIN de 6 dígitos da verificação em duas etapas para registrar o número na Meta.' });
-      }
-      if (whatsappAccounts.some((account) => account.phoneNumberId === normalizedPhoneNumberId)) {
-        return res.status(409).json({ success: false, error: 'Este Phone Number ID já pertence a outra linha cadastrada.' });
+      const { name, color, isDefault } = req.body;
+      const normalizedName = normalizeAccountName(name);
+      if (!uazapiService.getConfig().isConfigured) {
+        return res.status(400).json({ success: false, error: 'Configure a Server URL e o Admin Token da UazAPI antes de criar uma linha.' });
       }
 
-      await registerWhatsAppPhoneNumber({
-        phoneNumberId: normalizedPhoneNumberId,
-        accessToken: effectiveAccessToken,
-        pin: normalizedRegistrationPin,
-        accountName: String(name).trim(),
-      });
+      const created = await uazapiService.createInstance(normalizedName);
+      const instance = created.instance || {};
+      if (!instance.id || !instance.token) {
+        return res.status(502).json({ success: false, error: 'A UazAPI criou a instância sem retornar ID e token.' });
+      }
 
       const newId = `acc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       
@@ -4410,16 +4616,16 @@ async function startServer() {
 
       const newAccount: WhatsAppAccount = {
         id: newId,
-        name: name.trim(),
-        phoneNumber: (phoneNumber || '').trim(),
-        phoneNumberId: normalizedPhoneNumberId,
-        wabaId: (wabaId || '').trim(),
-        accessToken: normalizedAccessToken,
-        verifyToken: metaConfig.verifyToken,
-        registrationStatus: 'registered',
+        name: normalizedName,
+        phoneNumber: '',
+        phoneNumberId: String(instance.id),
+        provider: 'uazapi',
+        uazapiInstanceId: String(instance.id),
+        uazapiToken: String(instance.token),
+        connectionStatus: instance.status || 'disconnected',
         isDefault: Boolean(isDefault) || whatsappAccounts.length === 0,
         color: color || 'blue',
-        flow: createEmptyAccountFlow(newId, name.trim()),
+        flow: createEmptyAccountFlow(newId, normalizedName),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -4428,52 +4634,36 @@ async function startServer() {
       saveAccountsToFile();
       await mongoService.saveFlow(newAccount.flow);
 
+      let connection: any = null;
+      let webhookWarning = '';
+      try {
+        connection = await uazapiService.connectInstance(newAccount.uazapiToken!);
+        newAccount.connectionStatus = connection?.instance?.status || 'connecting';
+        const publicOrigin = lastKnownPublicOrigin;
+        if (publicOrigin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(publicOrigin)) {
+          await uazapiService.configureWebhook(newAccount.uazapiToken!, `${publicOrigin}/api/webhooks/uazapi`);
+        } else {
+          webhookWarning = 'A linha foi criada, mas o webhook será configurado quando o FluxoZap tiver uma URL pública.';
+        }
+        saveAccountsToFile();
+      } catch (connectionError: any) {
+        webhookWarning = connectionError.message || 'A instância foi criada, mas a conexão ainda não pôde ser iniciada.';
+      }
+
       res.json({
         success: true,
-        message: `Número ${newAccount.name} registrado na Meta e adicionado com sucesso!`,
-        account: newAccount,
+        message: `Instância ${newAccount.name} criada na UazAPI. Escaneie o QR Code para conectar o número.`,
+        account: { ...newAccount, uazapiToken: undefined, hasInstanceToken: true },
+        connection,
+        warning: webhookWarning || undefined,
       });
     } catch (err: any) {
-      res.status(err.status || 500).json({ success: false, error: err.message, meta: err.meta, diagnosticTip: err.diagnosticTip });
+      res.status(err.status || 500).json({ success: false, error: err.message, details: err.responseBody });
     }
   });
 
   app.post('/api/accounts/:id/register-approved-name', async (req: Request, res: Response) => {
-    try {
-      const account = whatsappAccounts.find((item) => item.id === req.params.id);
-      if (!account) return res.status(404).json({ success: false, error: 'Número não encontrado.' });
-
-      const registrationPin = String(req.body?.registrationPin || '').trim();
-      if (!isValidWhatsAppRegistrationPin(registrationPin)) {
-        return res.status(400).json({ success: false, error: 'Informe o PIN de 6 dígitos da verificação em duas etapas.' });
-      }
-      const accessToken = String(account.accessToken || metaConfig.accessToken || '').trim();
-      if (!accessToken) {
-        return res.status(400).json({ success: false, error: 'Configure um Access Token para esta linha antes de registrar o nome aprovado.' });
-      }
-
-      await registerWhatsAppPhoneNumber({
-        phoneNumberId: account.phoneNumberId,
-        accessToken,
-        pin: registrationPin,
-        accountName: account.name,
-      });
-      account.registrationStatus = 'registered';
-      account.updatedAt = new Date().toISOString();
-      saveAccountsToFile();
-      res.json({
-        success: true,
-        message: `O nome aprovado da linha ${account.name} foi registrado novamente na Meta.`,
-        account,
-      });
-    } catch (err: any) {
-      res.status(err.status || 500).json({
-        success: false,
-        error: err.message,
-        meta: err.meta,
-        diagnosticTip: err.diagnosticTip,
-      });
-    }
+    res.status(410).json({ success: false, error: 'Registro de nome aprovado pertence à API oficial e não é usado pela UazAPI.' });
   });
 
   app.put('/api/accounts/:id', (req: Request, res: Response) => {
@@ -4483,7 +4673,7 @@ async function startServer() {
       return res.status(404).json({ success: false, error: 'Número não encontrado.' });
     }
 
-    const { name, phoneNumber, phoneNumberId, wabaId, accessToken, color, isDefault } = req.body;
+    const { name, color, isDefault } = req.body;
 
     if (isDefault) {
       whatsappAccounts.forEach((a) => (a.isDefault = false));
@@ -4499,16 +4689,6 @@ async function startServer() {
       }
       account.name = normalizedName;
     }
-    if (phoneNumber !== undefined) account.phoneNumber = phoneNumber.trim();
-    if (phoneNumberId !== undefined) {
-      const normalizedPhoneNumberId = phoneNumberId.trim();
-      if (whatsappAccounts.some((item) => item.id !== id && item.phoneNumberId === normalizedPhoneNumberId)) {
-        return res.status(409).json({ success: false, error: 'Este Phone Number ID já pertence a outra linha cadastrada.' });
-      }
-      account.phoneNumberId = normalizedPhoneNumberId;
-    }
-    if (wabaId !== undefined) account.wabaId = wabaId.trim();
-    if (accessToken !== undefined) account.accessToken = accessToken.trim();
     if (color !== undefined) account.color = color;
     account.updatedAt = new Date().toISOString();
 
@@ -4518,10 +4698,6 @@ async function startServer() {
 
   app.delete('/api/accounts/:id', (req: Request, res: Response) => {
     const { id } = req.params;
-    if (whatsappAccounts.length <= 1) {
-      return res.status(400).json({ success: false, error: 'Não é possível remover a única conta cadastrada.' });
-    }
-
     const idx = whatsappAccounts.findIndex((a) => a.id === id);
     if (idx === -1) {
       return res.status(404).json({ success: false, error: 'Número não encontrado.' });
@@ -4737,7 +4913,143 @@ async function startServer() {
     });
   });
 
-  // API: Webhook Verification for Meta (GET)
+  // API: UazAPI webhook. The instance token in the envelope is used to route
+  // the event to exactly one configured line and is never written to logs.
+  app.post('/api/webhooks/uazapi', (req: Request, res: Response) => {
+    res.sendStatus(200);
+    const body = req.body || {};
+    void (async () => {
+      try {
+        const account = whatsappAccounts.find((item) => item.uazapiToken && item.uazapiToken === String(body.token || ''));
+        if (!account) {
+          console.warn('[UazAPI Webhook] Evento ignorado: token não pertence a nenhuma linha cadastrada.');
+          return;
+        }
+        const safeBody = { ...body, token: '[redacted]' };
+        addApiLog({
+          type: 'incoming_webhook', direction: 'inbound', endpoint: 'POST /api/webhooks/uazapi',
+          accountId: account.id, accountName: account.name, phoneNumberId: account.uazapiInstanceId,
+          success: true, requestPayload: safeBody,
+        });
+
+        if (body.EventType === 'connection') {
+          const instance = body.instance || {};
+          account.connectionStatus = instance.status || account.connectionStatus || 'disconnected';
+          const owner = String(body.owner || instance.owner || '').replace(/\D/g, '');
+          if (owner) account.phoneNumber = owner;
+          account.updatedAt = new Date().toISOString();
+          saveAccountsToFile();
+          return;
+        }
+
+        if (body.EventType === 'messages_update') {
+          const event = body.event || {};
+          const cleanPhone = String(event.sender_pn || event.Chat || event.chatid || '').split('@')[0].replace(/\D/g, '');
+          if (!cleanPhone) return;
+          const session = sessions.get(sessionStorageKey(account.id, cleanPhone));
+          if (!session) return;
+          const rawState = String(body.state || event.Type || '').toLowerCase();
+          const nextStatus = rawState.includes('read') ? 'read' : rawState.includes('deliver') ? 'delivered' : rawState.includes('fail') ? 'failed' : 'sent';
+          for (const id of event.MessageIDs || []) {
+            const item = session.history.find((entry) => entry.id === String(id));
+            if (item) item.status = nextStatus;
+          }
+          session.updatedAt = new Date().toISOString();
+          await persistSession(session);
+          return;
+        }
+
+        if (body.EventType !== 'messages') return;
+        const message = body.message || {};
+        if (message.fromMe || message.wasSentByApi || message.isGroup) return;
+        const senderJid = String(message.sender_pn || message.sender || message.chatid || '');
+        const cleanPhone = senderJid.split('@')[0].replace(/\D/g, '');
+        if (!cleanPhone) return;
+
+        const session = getOrCreateSession(cleanPhone, account.id);
+        session.accountId = account.id;
+        session.accountPhoneNumberId = account.uazapiInstanceId || account.phoneNumberId;
+        if (message.senderName && !session.name) session.name = String(message.senderName);
+        refreshDefaultSessionVariables(session);
+        if (session.isBlocked) return;
+
+        const messageId = String(message.messageid || message.id || `uaz_${Date.now()}`);
+        if (session.history.some((item) => item.id === messageId)) return;
+        const typeName = String(message.messageType || '').toLowerCase();
+        let contentObject: any = message.content || {};
+        if (typeof contentObject === 'string') {
+          try { contentObject = JSON.parse(contentObject); } catch { contentObject = {}; }
+        }
+
+        const contextInfo = contentObject?.contextInfo || contentObject?.extendedTextMessage?.contextInfo || {};
+        const ad = contextInfo?.externalAdReply || contentObject?.externalAdReply;
+        if (ad) {
+          session.referral = {
+            isFromAd: true,
+            sourceType: 'ad',
+            sourceId: ad.sourceId ? String(ad.sourceId) : undefined,
+            sourceUrl: ad.sourceUrl,
+            headline: ad.title,
+            body: ad.body,
+            mediaType: ad.mediaType ? String(ad.mediaType) : undefined,
+            receivedAt: new Date().toISOString(),
+          };
+        }
+
+        const text = String(message.text || contentObject?.text || '').trim();
+        const timestamp = Number(message.messageTimestamp || Date.now());
+        const replyId = String(message.quoted || contextInfo?.stanzaId || '') || undefined;
+        const isText = typeName.includes('conversation') || typeName.includes('text') || (!typeName && Boolean(text));
+        if (isText) {
+          await handleIncomingUserMessage(session, text || '[Mensagem recebida]', true, {
+            id: messageId,
+            replyToMessageId: replyId,
+            timestamp: String(Math.floor(timestamp / 1000)),
+          });
+          return;
+        }
+
+        const mediaType: 'text' | 'image' | 'audio' | 'video' | 'document' = typeName.includes('image')
+          ? 'image'
+          : typeName.includes('audio') || typeName.includes('ptt')
+            ? 'audio'
+            : typeName.includes('video')
+              ? 'video'
+              : typeName.includes('document')
+                ? 'document'
+                : 'text';
+        const fallback = mediaType === 'image' ? '[Foto Recebida]'
+          : mediaType === 'audio' ? '[Áudio Recebido]'
+            : mediaType === 'video' ? '[Vídeo Recebido]'
+              : mediaType === 'document' ? '[Documento Recebido]'
+                : `[Mensagem ${message.messageType || 'recebida'}]`;
+        const mediaUrl = message.fileURL || contentObject?.fileURL || contentObject?.url || contentObject?.URL;
+        const filename = contentObject?.fileName || contentObject?.filename || contentObject?.docName;
+        const original = replyId ? session.history.find((item) => item.id === replyId) : undefined;
+        session.history.push({
+          id: messageId,
+          sender: 'user',
+          type: mediaType,
+          content: text || fallback,
+          mediaUrl: typeof mediaUrl === 'string' ? mediaUrl : undefined,
+          filename: filename ? String(filename) : undefined,
+          caption: text || undefined,
+          replyTo: original ? { messageId: original.id, sender: original.sender, content: original.content, type: original.type } : undefined,
+          timestamp: formatBrasiliaTime(new Date(timestamp)),
+        });
+        if (!session.botPaused) await handleIncomingUserMessage(session, text || fallback, true);
+        else await persistSession(session);
+      } catch (error: any) {
+        console.error('[UazAPI Webhook] Falha ao processar evento:', error);
+        addApiLog({
+          type: 'error', direction: 'inbound', endpoint: 'POST /api/webhooks/uazapi',
+          success: false, metaErrorMessage: error.message || 'Falha no webhook da UazAPI.',
+        });
+      }
+    })();
+  });
+
+  // Legacy Meta webhook kept temporarily so old deliveries receive a 2xx during migration.
   app.get('/api/webhook', (req: Request, res: Response) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -5078,7 +5390,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: `Fluxo iniciado para ${cleanPhone} via WhatsApp Oficial!`,
+        message: `Fluxo iniciado para ${cleanPhone} via UazAPI!`,
         logEntry: lastLog,
       });
     } catch (err: any) {
@@ -5117,6 +5429,7 @@ async function startServer() {
       name: account.name,
       phoneNumberId: account.phoneNumberId,
       accessToken: account.accessToken,
+      uazapiToken: account.uazapiToken,
     };
 
     // If requested, pause automated bot so agent can take over conversation
@@ -5127,15 +5440,15 @@ async function startServer() {
     try {
       let sendResult: any = { success: true };
       if (type === 'text') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'text', { text, replyToMessageId }, accountCredentials);
+        sendResult = await sendUazapiWhatsAppMessage(cleanPhone, 'text', { text, replyToMessageId }, accountCredentials);
       } else if (type === 'image') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'image', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
+        sendResult = await sendUazapiWhatsAppMessage(cleanPhone, 'image', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       } else if (type === 'document') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'document', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
+        sendResult = await sendUazapiWhatsAppMessage(cleanPhone, 'document', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       } else if (type === 'audio') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename, replyToMessageId, voice: sendAsVoice === true, sendByLink: sendByLink === true }, accountCredentials);
+        sendResult = await sendUazapiWhatsAppMessage(cleanPhone, 'audio', { mediaId, mediaUrl, mimeType: mediaMimeType, filename, replyToMessageId, voice: sendAsVoice === true, sendByLink: sendByLink === true }, accountCredentials);
       } else if (type === 'video') {
-        sendResult = await sendMetaWhatsAppMessage(cleanPhone, 'video', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
+        sendResult = await sendUazapiWhatsAppMessage(cleanPhone, 'video', { mediaId, mediaUrl, mimeType: mediaMimeType, caption, filename, replyToMessageId }, accountCredentials);
       }
 
       // Add to session history as agent message
@@ -5190,7 +5503,7 @@ async function startServer() {
       await persistSession(session);
       res.json({
         success: true,
-        message: blocked ? 'Contato bloqueado na Meta e no FluxoZap.' : 'Contato desbloqueado na Meta e no FluxoZap.',
+        message: blocked ? 'Contato bloqueado no WhatsApp e no FluxoZap.' : 'Contato desbloqueado no WhatsApp e no FluxoZap.',
         session,
       });
     } catch (err: any) {

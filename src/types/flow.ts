@@ -21,11 +21,26 @@ export interface WhatsAppAccount {
   verifyToken?: string;
   ctwaDatasetId?: string; // Dataset de eventos CTWA vinculado à WABA
   registrationStatus?: 'registered' | 'unknown';
+  provider?: 'uazapi';
+  uazapiInstanceId?: string;
+  uazapiToken?: string;
+  connectionStatus?: 'disconnected' | 'connecting' | 'connected' | 'hibernated' | string;
+  profileName?: string;
+  profilePicUrl?: string;
+  isBusiness?: boolean;
   isDefault?: boolean;
   color?: string; // Cor temática para crachá (emerald, blue, purple, amber, indigo, etc.)
   flow?: FlowDefinition; // Fluxo exclusivo deste número de WhatsApp
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UazapiConfig {
+  serverUrl: string;
+  adminToken: string;
+  hasAdminToken?: boolean;
+  maskedAdminToken?: string;
+  isConfigured?: boolean;
 }
 
 export interface ApiCostAnalytics {

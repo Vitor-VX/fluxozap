@@ -1,632 +1,140 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  Key,
-  Smartphone,
-  ShieldCheck,
-  CheckCircle2,
-  AlertCircle,
-  Copy,
-  ExternalLink,
-  Send,
-  Loader2,
-  RefreshCw,
-  Terminal,
-  ShieldAlert,
-  Database,
-} from 'lucide-react';
-import { MetaConfig } from '../../types/flow';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, CheckCircle2, Copy, Key, Loader2, QrCode, RefreshCw, Send, Server, Smartphone, Terminal, Unplug } from 'lucide-react';
+import { UazapiConfig } from '../../types/flow';
 
-interface MetaApiSettingsProps {
+interface Props {
   onOpenLogs?: () => void;
   onConnectionUpdated?: () => void;
   activeAccountId?: string;
 }
 
-export const MetaApiSettings: React.FC<MetaApiSettingsProps> = ({ onOpenLogs, onConnectionUpdated, activeAccountId }) => {
-  const [config, setConfig] = useState<MetaConfig>({
-    phoneNumberId: '',
-    accessToken: '',
-    wabaId: '',
-    verifyToken: 'fluxozap_webhook_secret_2026',
-    testPhoneNumber: '',
-  });
+type Notice = { success: boolean; message: string } | null;
 
-  const [maskedToken, setMaskedToken] = useState('');
-  const [hasAccessToken, setHasAccessToken] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [isSendingLive, setIsSendingLive] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    success: boolean;
-    message: string;
-    details?: any;
-    diagnosticTip?: string;
-  } | null>(null);
-  const [sendLiveResult, setSendLiveResult] = useState<{
-    success: boolean;
-    message: string;
-    diagnosticTip?: string;
-    metaResponse?: any;
-  } | null>(null);
-  const [copiedWebhook, setCopiedWebhook] = useState(false);
-  const [activeAccountName, setActiveAccountName] = useState('');
-  const [datasetName, setDatasetName] = useState('FluxoZap CTWA');
-  const [ctwaDataset, setCtwaDataset] = useState<{ id: string; name?: string } | null>(null);
-  const [datasetLoading, setDatasetLoading] = useState(false);
-  const [datasetResult, setDatasetResult] = useState<{ success: boolean; message: string } | null>(null);
-  const activeAccountRef = useRef(activeAccountId);
+export const MetaApiSettings: React.FC<Props> = ({ onOpenLogs, onConnectionUpdated, activeAccountId }) => {
+  const [config, setConfig] = useState<UazapiConfig>({ serverUrl: '', adminToken: '' });
+  const [notice, setNotice] = useState<Notice>(null);
+  const [busy, setBusy] = useState('');
+  const [status, setStatus] = useState<any>(null);
+  const [qrCode, setQrCode] = useState('');
+  const [testPhone, setTestPhone] = useState('');
+  const webhookUrl = `${window.location.origin}/api/webhooks/uazapi`;
 
-  const webhookUrl = `${window.location.origin}/api/webhook`;
-
-  const fetchConfig = async () => {
-    try {
-      if (!activeAccountId) return;
-      const res = await fetch(`/api/config?accountId=${encodeURIComponent(activeAccountId)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (activeAccountRef.current !== activeAccountId) return;
-        setConfig({
-          phoneNumberId: data.phoneNumberId || '',
-          displayPhoneNumber: data.displayPhoneNumber || '',
-          accessToken: '',
-          wabaId: data.wabaId || '',
-          verifyToken: data.verifyToken || 'fluxozap_webhook_secret_2026',
-          testPhoneNumber: data.testPhoneNumber || '',
-        });
-        setActiveAccountName(data.accountName || '');
-        setMaskedToken(data.maskedToken || '');
-        setHasAccessToken(data.hasAccessToken);
-      }
-    } catch (err) {
-      console.error('Error fetching config:', err);
-    }
+  const loadConfig = async () => {
+    const response = await fetch('/api/uazapi/config');
+    if (!response.ok) return;
+    const data = await response.json();
+    setConfig((current) => ({ ...current, ...data, adminToken: '' }));
   };
 
-  const fetchCtwaDataset = async (silent = false) => {
+  const loadStatus = async (showError = true) => {
     if (!activeAccountId) return;
-    if (!silent) setDatasetLoading(true);
-    setDatasetResult(null);
     try {
-      const res = await fetch(`/api/config/ctwa-dataset?accountId=${encodeURIComponent(activeAccountId)}`);
-      const data = await res.json();
-      if (activeAccountRef.current !== activeAccountId) return;
-      if (!res.ok) throw new Error(data.error || 'Não foi possível consultar o Dataset CTWA.');
-      setCtwaDataset(data.dataset || null);
-      if (!silent) setDatasetResult({ success: true, message: data.dataset ? 'Dataset CTWA localizado nesta WABA.' : 'Esta WABA ainda não possui um Dataset CTWA.' });
-    } catch (err: any) {
-      setCtwaDataset(null);
-      if (!silent) setDatasetResult({ success: false, message: err.message });
-    } finally {
-      if (!silent) setDatasetLoading(false);
+      const response = await fetch(`/api/accounts/${encodeURIComponent(activeAccountId)}/status`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Não foi possível consultar a instância.');
+      setStatus(data);
+      setQrCode(data.instance?.qrcode || '');
+      onConnectionUpdated?.();
+    } catch (error: any) {
+      if (showError) setNotice({ success: false, message: error.message });
     }
   };
 
-  const createCtwaDataset = async () => {
-    if (!activeAccountId || !window.confirm(`Criar o Dataset CTWA “${datasetName || 'FluxoZap CTWA'}” para esta WABA?`)) return;
-    setDatasetLoading(true);
-    setDatasetResult(null);
-    try {
-      const res = await fetch('/api/config/ctwa-dataset', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: activeAccountId, datasetName }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Não foi possível criar o Dataset CTWA.');
-      setCtwaDataset(data.dataset || null);
-      setDatasetResult({ success: true, message: data.message || 'Dataset CTWA criado com sucesso.' });
-    } catch (err: any) {
-      setDatasetResult({ success: false, message: err.message });
-    } finally {
-      setDatasetLoading(false);
-    }
-  };
-
+  useEffect(() => { loadConfig().catch(() => undefined); }, []);
   useEffect(() => {
-    activeAccountRef.current = activeAccountId;
-    setTestResult(null);
-    setSendLiveResult(null);
-    setMaskedToken('');
-    setHasAccessToken(false);
-    setActiveAccountName('');
-    setCtwaDataset(null);
-    setDatasetResult(null);
-    fetchConfig();
-    fetchCtwaDataset(true);
+    setStatus(null); setQrCode(''); setNotice(null);
+    loadStatus(false).catch(() => undefined);
   }, [activeAccountId]);
+  useEffect(() => {
+    if (!activeAccountId || status?.instance?.status !== 'connecting') return;
+    const timer = window.setInterval(() => loadStatus(false), 4000);
+    return () => window.clearInterval(timer);
+  }, [activeAccountId, status?.instance?.status]);
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
-    setTestResult(null);
-
+  const request = async (key: string, url: string, init?: RequestInit) => {
+    setBusy(key); setNotice(null);
     try {
-      const res = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...config, accountId: activeAccountId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setTestResult({
-          success: true,
-          message: 'Configurações da Meta WhatsApp API salvas com sucesso!',
-        });
-        await fetchConfig();
-        onConnectionUpdated?.();
-      } else {
-        setTestResult({
-          success: false,
-          message: data.error || 'Erro ao salvar credenciais.',
-        });
-      }
-    } catch (err: any) {
-      setTestResult({ success: false, message: err.message });
-    } finally {
-      setIsSaving(false);
-    }
+      const response = await fetch(url, init);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'A operação não pôde ser concluída.');
+      return data;
+    } catch (error: any) {
+      setNotice({ success: false, message: error.message });
+      return null;
+    } finally { setBusy(''); }
   };
 
-  const handleTestConnection = async () => {
-    setIsTesting(true);
-    setTestResult(null);
-
-    try {
-      const res = await fetch('/api/config/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumberId: config.phoneNumberId,
-          accessToken: config.accessToken,
-          accountId: activeAccountId,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setTestResult({
-          success: true,
-          message: data.message,
-          details: data.data,
-        });
-        await fetchConfig();
-        onConnectionUpdated?.();
-      } else {
-        setTestResult({
-          success: false,
-          message: data.error || 'Falha ao validar credenciais da Meta.',
-          diagnosticTip: data.diagnosticTip,
-        });
-      }
-    } catch (err: any) {
-      setTestResult({
-        success: false,
-        message: err.message || 'Erro de conexão.',
-      });
-    } finally {
-      setIsTesting(false);
-    }
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const data = await request('save', '/api/uazapi/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverUrl: config.serverUrl, adminToken: config.adminToken }),
+    });
+    if (data) { setNotice({ success: true, message: data.message }); await loadConfig(); }
   };
 
-  const handleSendLiveTest = async () => {
-    if (!config.testPhoneNumber.trim()) {
-      setSendLiveResult({
-        success: false,
-        message: 'Preencha o número de telefone de teste com DDD (ex: 5511999999999).',
-        diagnosticTip: 'O número precisa do código do país (55 para Brasil), DDD e os 9 dígitos (ex: 5511999999999).',
-      });
-      return;
-    }
-
-    setIsSendingLive(true);
-    setSendLiveResult(null);
-
-    try {
-      const res = await fetch('/api/send-live', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: config.testPhoneNumber, accountId: activeAccountId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSendLiveResult({
-          success: true,
-          message: `Fluxo enviado para ${config.testPhoneNumber}! Verifique o seu WhatsApp.`,
-        });
-      } else {
-        setSendLiveResult({
-          success: false,
-          message: data.error || 'Falha ao enviar mensagem pelo WhatsApp Oficial.',
-          diagnosticTip: data.diagnosticTip,
-          metaResponse: data.metaResponse,
-        });
-      }
-    } catch (err: any) {
-      setSendLiveResult({
-        success: false,
-        message: err.message || 'Erro ao comunicar com o servidor.',
-      });
-    } finally {
-      setIsSendingLive(false);
-    }
+  const test = async () => {
+    const data = await request('test', '/api/uazapi/test', { method: 'POST' });
+    if (data) setNotice({ success: true, message: `${data.message}${typeof data.instances === 'number' ? ` ${data.instances} instância(s) encontrada(s).` : ''}` });
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedWebhook(true);
-    setTimeout(() => setCopiedWebhook(false), 2000);
+  const connect = async () => {
+    if (!activeAccountId) return;
+    const data = await request('connect', `/api/accounts/${encodeURIComponent(activeAccountId)}/connect`, { method: 'POST' });
+    if (!data) return;
+    setQrCode(data.instance?.qrcode || data.qrcode || '');
+    setNotice({ success: true, message: 'Conexão iniciada. Leia o QR Code em Aparelhos conectados no WhatsApp.' });
+    await loadStatus(false);
   };
 
-  return (
-    <div className="h-full overflow-y-auto bg-slate-50 p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Page Header */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-              <Smartphone className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                Integração WhatsApp Cloud API (Oficial da Meta)
-              </h2>
-              <p className="text-xs text-emerald-700 font-semibold mt-0.5">
-                Configurando: {activeAccountName || 'linha selecionada'}
-              </p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Configure as credenciais da Meta Developers para envio automático de mensagens e recebimento de respostas no WhatsApp Oficial.
-              </p>
-            </div>
-          </div>
+  const disconnect = async () => {
+    if (!activeAccountId || !confirm('Desconectar esta instância? Um novo QR Code será necessário.')) return;
+    const data = await request('disconnect', `/api/accounts/${encodeURIComponent(activeAccountId)}/disconnect`, { method: 'POST' });
+    if (data) { setStatus({ instance: { status: 'disconnected' } }); setQrCode(''); setNotice({ success: true, message: 'Instância desconectada.' }); onConnectionUpdated?.(); }
+  };
 
-          {onOpenLogs && (
-            <button
-              type="button"
-              onClick={onOpenLogs}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold cursor-pointer transition-colors shrink-0"
-            >
-              <Terminal className="w-4 h-4 text-slate-700" />
-              <span>Ver Logs da API</span>
-            </button>
-          )}
-        </div>
+  const configureWebhook = async () => {
+    if (!activeAccountId) return;
+    const data = await request('webhook', `/api/accounts/${encodeURIComponent(activeAccountId)}/configure-webhook`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ publicOrigin: window.location.origin }),
+    });
+    if (data) setNotice({ success: true, message: data.message });
+  };
 
-        {/* Credentials Form */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs">
-          <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2">
-            <Key className="w-4 h-4 text-emerald-600" />
-            Chaves de API da Meta
-          </h3>
-          <p className="text-xs text-slate-500 mb-5">
-            Obtidas em <strong>Meta for Developers</strong> &gt; Seu Aplicativo &gt; WhatsApp &gt; Configuração da API.
-          </p>
+  const sendTest = async () => {
+    const data = await request('send', '/api/send-live', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: activeAccountId, phoneNumber: testPhone }),
+    });
+    if (data) setNotice({ success: true, message: data.message || 'Fluxo enviado.' });
+  };
 
-          <div className={`mb-5 p-3.5 rounded-xl border ${
-            config.displayPhoneNumber
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : 'bg-amber-50 border-amber-200 text-amber-900'
-          }`}>
-            <p className="text-xs font-bold">
-              {config.displayPhoneNumber
-                ? `Número conectado pela Meta: ${config.displayPhoneNumber}`
-                : 'Nenhum número validado e conectado'}
-            </p>
-            <p className="text-[11px] mt-1 leading-relaxed opacity-80">
-              {config.displayPhoneNumber
-                ? 'Esta linha usa exatamente o display_phone_number retornado pela API da Meta para o Phone Number ID abaixo.'
-                : 'Salve as credenciais desta linha e use “Testar Conexão”. O número real aparecerá depois que a Meta validar este Phone Number ID.'}
-            </p>
-          </div>
+  const currentStatus = status?.instance?.status || status?.account?.connectionStatus || 'desconhecido';
+  const connected = currentStatus === 'connected' || status?.status?.connected === true;
+  const Spinner = () => <Loader2 className="h-3.5 w-3.5 animate-spin" />;
 
-          <form onSubmit={handleSave} className="space-y-4 text-xs">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Phone Number ID (ID do Número de Telefone)
-                </label>
-                <input
-                  type="text"
-                  value={config.phoneNumberId}
-                  onChange={(e) => setConfig({ ...config, phoneNumberId: e.target.value })}
-                  placeholder="Ex: 104234567890123"
-                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-mono text-xs"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  ID numérico fornecido no painel da Meta para o seu número do WhatsApp.
-                </p>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  WhatsApp Business Account ID (WABA ID)
-                </label>
-                <input
-                  type="text"
-                  value={config.wabaId}
-                  onChange={(e) => setConfig({ ...config, wabaId: e.target.value })}
-                  placeholder="Ex: 109876543210987"
-                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-mono text-xs"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  ID da conta comercial do WhatsApp associada ao aplicativo.
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="font-semibold text-slate-700">
-                  Meta Access Token (Token de Acesso do Sistema)
-                </label>
-                {hasAccessToken && (
-                  <span className="text-[11px] text-emerald-600 font-medium">
-                    ✓ Token salvo ({maskedToken})
-                  </span>
-                )}
-              </div>
-              <input
-                type="password"
-                value={config.accessToken}
-                onChange={(e) => setConfig({ ...config, accessToken: e.target.value })}
-                placeholder={hasAccessToken ? '•••••••••••••••••••••••• (deixe em branco para manter o atual)' : 'EAABw...'}
-                className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-mono text-xs"
-              />
-              <p className="text-[11px] text-slate-400 mt-1">
-                Gere um token permanente em Usuários do Sistema com <code>whatsapp_business_messaging</code>, <code>whatsapp_business_management</code> e <code>whatsapp_business_manage_events</code>.
-              </p>
-            </div>
-
-            {testResult && (
-              <div
-                className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
-                  testResult.success
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                    : 'bg-rose-50 border-rose-200 text-rose-900'
-                }`}
-              >
-                <div className="flex items-start gap-2.5">
-                  {testResult.success ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  )}
-                  <div className="flex-1">
-                    <p className="font-semibold">{testResult.message}</p>
-                    {testResult.details && (
-                      <div className="mt-2 text-[11px] space-y-0.5 opacity-90 font-mono">
-                        <p>Nome verificado: {testResult.details.verifiedName || 'N/A'}</p>
-                        <p>Número exibido: {testResult.details.displayPhoneNumber || 'N/A'}</p>
-                        <p>Qualidade: {testResult.details.qualityRating || 'GREEN'}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {!testResult.success && testResult.diagnosticTip && (
-                  <div className="mt-1 p-3 bg-amber-50 rounded-lg border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
-                    <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="font-bold text-[11px] uppercase tracking-wider text-amber-800 mb-0.5">
-                        Diagnóstico da Meta:
-                      </p>
-                      <p className="leading-relaxed whitespace-pre-line">{testResult.diagnosticTip}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold cursor-pointer shadow-xs transition-colors flex items-center gap-2"
-              >
-                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                Salvar Credenciais
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={isTesting}
-                className="px-4 py-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer border border-slate-300 transition-colors flex items-center gap-2"
-              >
-                {isTesting ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3.5 h-3.5" />
-                )}
-                Testar Conexão com a Meta API
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* Live Test WhatsApp Message */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
-          <div className="flex items-center gap-2">
-            <Send className="w-4 h-4 text-emerald-600" />
-            <h3 className="text-sm font-bold text-slate-900">
-              Disparar Teste para WhatsApp Real
-            </h3>
-          </div>
-          <p className="text-xs text-slate-600">
-            Envie o fluxo ativo agora mesmo diretamente para o seu celular pelo WhatsApp Oficial para validar a experiência na prática.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="text"
-              value={config.testPhoneNumber}
-              onChange={(e) => setConfig({ ...config, testPhoneNumber: e.target.value })}
-              placeholder="Ex: 5511999999999 (Código do país + DDD + Número)"
-              className="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-            />
-            <button
-              type="button"
-              onClick={handleSendLiveTest}
-              disabled={isSendingLive}
-              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs cursor-pointer shadow-xs transition-colors flex items-center justify-center gap-2 shrink-0"
-            >
-              {isSendingLive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-              Disparar no Meu WhatsApp
-            </button>
-          </div>
-
-          {sendLiveResult && (
-            <div
-              className={`p-3.5 rounded-xl border text-xs space-y-2.5 ${
-                sendLiveResult.success
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : 'bg-rose-50 border-rose-200 text-rose-900'
-              }`}
-            >
-              <div className="flex items-start gap-2.5">
-                {sendLiveResult.success ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                )}
-                <div className="flex-1">
-                  <span className="font-semibold block">{sendLiveResult.message}</span>
-                </div>
-              </div>
-
-              {!sendLiveResult.success && sendLiveResult.diagnosticTip && (
-                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
-                  <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="font-bold text-[11px] uppercase tracking-wider text-amber-800 mb-0.5">
-                      Diagnóstico do Erro do WhatsApp:
-                    </p>
-                    <p className="leading-relaxed whitespace-pre-line font-medium">
-                      {sendLiveResult.diagnosticTip}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {onOpenLogs && !sendLiveResult.success && (
-                <div className="pt-1 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={onOpenLogs}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800 hover:text-rose-950 underline cursor-pointer"
-                  >
-                    <Terminal className="w-3.5 h-3.5" />
-                    <span>Ver Resposta Bruta da Meta nos Logs</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Webhook Configuration for Incoming WhatsApp Messages */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-blue-600" />
-            <h3 className="text-sm font-bold text-slate-900">
-              Configuração de Webhook (Receber Mensagens do WhatsApp)
-            </h3>
-          </div>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Para que o FluxoZap receba as respostas dos usuários e execute os blocos de{' '}
-            <strong>Aguardar Resposta</strong> automaticamente, configure o Webhook no painel da Meta Developers:
-          </p>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                URL de Retorno de Chamada (Callback URL)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={webhookUrl}
-                  className="flex-1 px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-800 font-mono text-xs select-all"
-                />
-                <button
-                  type="button"
-                  onClick={() => copyToClipboard(webhookUrl)}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg font-medium text-slate-700 flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>{copiedWebhook ? 'Copiado!' : 'Copiar'}</span>
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Token de Verificação (Verify Token)
-              </label>
-              <input
-                type="text"
-                value={config.verifyToken}
-                onChange={(e) => setConfig({ ...config, verifyToken: e.target.value })}
-                className="w-full px-3.5 py-2 border border-slate-300 rounded-lg text-slate-900 font-mono text-xs"
-              />
-            </div>
-
-            <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-[11px] text-blue-900 space-y-1">
-              <p className="font-semibold">Passo a passo no portal da Meta Developers:</p>
-              <ol className="list-decimal pl-4 space-y-1 text-blue-800">
-                <li>Acesse <strong>WhatsApp &gt; Configuração &gt; Editar Webhook</strong>.</li>
-                <li>Cole a <strong>URL de Retorno</strong> e o <strong>Token de Verificação</strong> acima e clique em Verificar e Salvar.</li>
-                <li>Em Campos do Webhook, clique em Gerenciar e assine o campo <code>messages</code>.</li>
-              </ol>
-            </div>
-          </div>
-        </div>
-
-        {/* CTWA Dataset associated with the selected WhatsApp Business Account */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
-          <div className="flex items-center gap-2">
-            <Database className="w-4 h-4 text-violet-600" />
-            <h3 className="text-sm font-bold text-slate-900">Dataset de Conversões do WhatsApp (CTWA)</h3>
-          </div>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Consulte ou crie o Dataset ligado diretamente à WABA desta linha. Ele é separado do Pixel configurado em <strong>Meta Conversões</strong> e será priorizado nos eventos de compra que tiverem <code>ctwa_clid</code>.
-          </p>
-
-          <div className="grid gap-3 md:grid-cols-2 text-xs">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">WABA selecionada</label>
-              <input readOnly value={config.wabaId || 'Salve o WABA ID acima'} className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-slate-800 font-mono" />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Dataset atual</label>
-              <input readOnly value={ctwaDataset?.id || 'Nenhum Dataset localizado'} className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-slate-800 font-mono" />
-            </div>
-          </div>
-
-          {!ctwaDataset && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Nome do novo Dataset</label>
-              <input value={datasetName} onChange={(event) => setDatasetName(event.target.value)} maxLength={100} className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-slate-900 text-xs" />
-            </div>
-          )}
-
-          {datasetResult && (
-            <div className={`rounded-xl border p-3 text-xs ${datasetResult.success ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}`}>
-              {datasetResult.message}
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => fetchCtwaDataset(false)} disabled={datasetLoading} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
-              {datasetLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Consultar Dataset
-            </button>
-            {!ctwaDataset && (
-              <button type="button" onClick={createCtwaDataset} disabled={datasetLoading || !config.wabaId} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
-                <Database className="w-3.5 h-3.5" /> Criar Dataset CTWA
-              </button>
-            )}
-          </div>
-          <p className="text-[11px] text-slate-500">A criação usa o token oficial desta linha e exige acesso à WABA com permissões de gerenciamento do WhatsApp e eventos.</p>
-        </div>
-      </div>
+  return <div className="h-full overflow-y-auto bg-slate-50 p-6"><div className="mx-auto max-w-4xl space-y-6">
+    <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs">
+      <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-600 text-white"><Smartphone className="h-5 w-5" /></div><div><h2 className="text-lg font-bold text-slate-900">Integração WhatsApp pela UazAPI</h2><p className="mt-0.5 text-xs text-slate-500">Instâncias isoladas, conexão por QR Code e webhooks por linha.</p></div></div>
+      {onOpenLogs && <button type="button" onClick={onOpenLogs} className="flex items-center gap-2 rounded-xl bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-800"><Terminal className="h-4 w-4" /> Logs</button>}
     </div>
-  );
+
+    {notice && <div className={`flex items-start gap-2 rounded-xl border p-3.5 text-xs ${notice.success ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}`}>{notice.success ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}<strong>{notice.message}</strong></div>}
+
+    <form onSubmit={save} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs">
+      <div><h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Server className="h-4 w-4 text-emerald-600" /> Servidor UazAPI</h3><p className="mt-1 text-xs text-slate-500">As credenciais ficam somente no backend.</p></div>
+      <label className="block text-xs font-semibold text-slate-700">Server URL<input value={config.serverUrl} onChange={(e) => setConfig({ ...config, serverUrl: e.target.value })} placeholder="https://seu-subdominio.uazapi.com" className="mt-1 w-full rounded-lg border border-slate-300 px-3.5 py-2.5 font-mono text-xs" /></label>
+      <label className="block text-xs font-semibold text-slate-700">Admin Token<div className="mt-1 flex items-center gap-2"><Key className="h-4 w-4 text-slate-400" /><input type="password" value={config.adminToken} onChange={(e) => setConfig({ ...config, adminToken: e.target.value })} placeholder={config.hasAdminToken ? `${config.maskedAdminToken} — deixe vazio para manter` : 'Admin token'} className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 font-mono text-xs" /></div></label>
+      <div className="flex gap-2"><button disabled={busy === 'save'} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white">{busy === 'save' && <Spinner />} Salvar</button><button type="button" onClick={test} disabled={busy === 'test' || !config.isConfigured} className="flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-semibold">{busy === 'test' ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" />} Testar servidor</button></div>
+    </form>
+
+    <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs">
+      <div className="flex items-center justify-between"><div><h3 className="flex items-center gap-2 text-sm font-bold"><QrCode className="h-4 w-4 text-emerald-600" /> Conexão da linha selecionada</h3><p className="mt-1 text-xs text-slate-500">Estado: <strong className={connected ? 'text-emerald-700' : 'text-amber-700'}>{currentStatus}</strong></p></div><button type="button" onClick={() => loadStatus()} className="rounded-lg border border-slate-300 p-2"><RefreshCw className="h-4 w-4" /></button></div>
+      {qrCode && !connected && <div className="mx-auto max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center"><img src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`} alt="QR Code do WhatsApp" className="mx-auto aspect-square w-full rounded-xl bg-white object-contain p-2" /><p className="mt-3 text-xs font-semibold text-emerald-900">WhatsApp → Aparelhos conectados → Conectar aparelho</p></div>}
+      <div className="flex gap-2"><button type="button" onClick={connect} disabled={!activeAccountId || connected || busy === 'connect'} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">{busy === 'connect' ? <Spinner /> : <QrCode className="h-3.5 w-3.5" />} {currentStatus === 'disconnected' ? 'Reconectar e gerar QR Code' : 'Gerar novo QR Code'}</button><button type="button" onClick={disconnect} disabled={!connected || busy === 'disconnect'} className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-700 disabled:opacity-50">{busy === 'disconnect' ? <Spinner /> : <Unplug className="h-3.5 w-3.5" />} Desconectar</button></div>
+    </div>
+
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6"><h3 className="text-sm font-bold">Webhook da UazAPI</h3><div className="flex gap-2"><input readOnly value={webhookUrl} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-xs" /><button type="button" onClick={() => navigator.clipboard.writeText(webhookUrl)} className="rounded-lg border border-slate-300 px-3"><Copy className="h-4 w-4" /></button></div><button type="button" onClick={configureWebhook} disabled={!activeAccountId || busy === 'webhook'} className="rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">Configurar automaticamente</button><p className="text-[11px] text-slate-500">A URL precisa ser pública e HTTPS.</p></div>
+
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6"><h3 className="flex items-center gap-2 text-sm font-bold"><Send className="h-4 w-4 text-emerald-600" /> Testar fluxo ativo</h3><div className="flex gap-2"><input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder="5511999999999" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3.5 py-2.5 font-mono text-xs" /><button type="button" onClick={sendTest} disabled={!activeAccountId || !testPhone.trim() || busy === 'send'} className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">{busy === 'send' && <Spinner />} Enviar</button></div></div>
+  </div></div>;
 };

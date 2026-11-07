@@ -8,3 +8,4 @@ coverage/
 !.env.example
 data/xpag_config.json
 data/xpag_payments.json
+data/uazapi_config.json

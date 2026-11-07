@@ -44,7 +44,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   const data = selectedNode.data;
   const isStart = selectedNode.type === 'start';
   const isMediaNode = ['send_image', 'send_audio', 'send_video', 'send_document'].includes(selectedNode.type);
-  const mediaStorage = data.mediaStorage || 'meta';
+  const mediaStorage = 'r2' as const;
 
   const copyVariable = async (variableName: string) => {
     const token = `{{${variableName}}}`;
@@ -56,11 +56,6 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (mediaStorage === 'meta' && !accountId) {
-      alert('Selecione uma linha do WhatsApp antes de enviar a mídia.');
-      e.target.value = '';
-      return;
-    }
     if (file.size > 100 * 1024 * 1024) {
       alert('O arquivo excede o limite máximo de 100 MB.');
       e.target.value = '';
@@ -71,9 +66,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     setUploadSuccess(null);
 
     try {
-      const uploadUrl = mediaStorage === 'r2'
-        ? '/api/r2/media'
-        : `/api/meta/media?accountId=${encodeURIComponent(accountId || '')}${selectedNode.type === 'send_audio' && data.sendAsVoice !== false ? '&voice=true' : ''}`;
+      const uploadUrl = '/api/r2/media';
       const res = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
@@ -86,25 +79,23 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
       const raw = await res.text();
       let resData: any = {};
       try { resData = JSON.parse(raw); } catch { resData = { error: raw }; }
-      const uploadedReference = mediaStorage === 'r2' ? resData.mediaUrl : resData.mediaId;
+      const uploadedReference = resData.mediaUrl;
       if (!res.ok || !uploadedReference) {
-        alert(resData.error || `Não foi possível enviar o arquivo para ${mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}.`);
+        alert(resData.error || 'Não foi possível salvar o arquivo no Cloudflare R2.');
         return;
       }
       onUpdateData(selectedNode.id, {
-        mediaStorage,
-        mediaId: mediaStorage === 'meta' ? resData.mediaId : '',
-        mediaUrl: mediaStorage === 'r2' ? resData.mediaUrl : '',
+        mediaStorage: 'r2',
+        mediaId: '',
+        mediaUrl: resData.mediaUrl,
         mediaMimeType: resData.mimeType || file.type,
         mediaSize: resData.size || file.size,
         filename: resData.filename || file.name,
       });
-      setUploadSuccess(mediaStorage === 'r2'
-        ? 'Arquivo salvo no Cloudflare R2. No envio, ele será associado à Meta da linha que executar o fluxo.'
-        : 'Arquivo preparado diretamente na Meta. Nenhuma cópia foi salva no R2.');
+      setUploadSuccess('Arquivo salvo no Cloudflare R2. A UazAPI usará esta URL quando o fluxo enviar a mensagem.');
       setTimeout(() => setUploadSuccess(null), 5000);
     } catch (err: any) {
-      alert(err.message || `Erro ao enviar arquivo para ${mediaStorage === 'r2' ? 'o Cloudflare R2' : 'a Meta'}.`);
+      alert(err.message || 'Erro ao salvar arquivo no Cloudflare R2.');
     } finally {
       setIsUploading(false);
       e.target.value = '';
@@ -380,30 +371,11 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         {isMediaNode && (
           <div className="p-3 rounded-xl border border-slate-200 bg-slate-50">
             <label className="block font-semibold text-slate-700 mb-2">Destino do arquivo do computador</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => onUpdateData(selectedNode.id, { mediaStorage: 'meta' })}
-                className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${mediaStorage === 'meta'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-200'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-              >
-                Direto para Meta
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateData(selectedNode.id, { mediaStorage: 'r2' })}
-                className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${mediaStorage === 'r2'
-                  ? 'border-orange-500 bg-orange-50 text-orange-700 ring-1 ring-orange-200'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
-              >
-                Cloudflare R2
-              </button>
+            <div className="rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">
+              Cloudflare R2 → envio pela UazAPI
             </div>
             <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-              {mediaStorage === 'r2'
-                ? 'O arquivo ficará persistido no R2. Ao executar o bloco, o FluxoZap o envia usando as credenciais Meta da linha ativa.'
-                : 'O arquivo é enviado agora para a biblioteca de mídia da Meta da linha selecionada e não é salvo no R2.'}
+              O arquivo fica persistido no R2 e a UazAPI recebe a URL no momento em que este bloco é executado.
             </p>
           </div>
         )}
